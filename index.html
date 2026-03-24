@@ -222,19 +222,21 @@ header{
     <!-- TICKETS PANEL -->
     <div class="panel active" id="panel-tickets">
       <div class="tkt-toolbar">
-        <input class="tkt-search" id="tkt-search" placeholder="Ticket suchen…" oninput="filterTickets()"/>
+        <input class="tkt-search" id="tkt-search" placeholder="# ID oder Titel suchen…" oninput="filterTickets()" style="flex:1;max-width:340px;"/>
         <select class="tkt-filter-sel" id="tkt-st" onchange="filterTickets()">
           <option value="">Alle Status</option>
-          <option>Offen</option>
+          <option>Offen</option><option>Neu</option>
           <option>In Bearbeitung</option>
-          <option>Erledigt</option>
-          <option>Abgebrochen</option>
+          <option>Erledigt</option><option>Abgebrochen</option>
         </select>
         <select class="tkt-filter-sel" id="tkt-prio" onchange="filterTickets()">
           <option value="">Alle Prioritäten</option>
-          <option>Niedrig</option><option>Mittel</option><option>Hoch</option><option>Kritisch</option>
+          <option>Niedrig</option><option>Normal</option><option>Mittel</option><option>Hoch</option><option>high</option><option>Kritisch</option>
         </select>
-        <span id="tkt-count" style="font-size:11px;color:var(--text-muted);margin-left:auto;"></span>
+        <select class="tkt-filter-sel" id="tkt-kat" onchange="filterTickets()"><option value="">Alle Kategorien</option></select>
+        <select class="tkt-filter-sel" id="tkt-werk" onchange="filterTickets()"><option value="">Alle Werke</option></select>
+        <select class="tkt-filter-sel" id="tkt-art" onchange="filterTickets()"><option value="">Alle Arten</option></select>
+        <span id="tkt-count" style="font-size:11px;color:var(--text-muted);margin-left:4px;white-space:nowrap;"></span>
       </div>
       <div class="tkt-main">
         <div style="flex:1;overflow:auto;" id="tkt-table-wrap">
@@ -483,21 +485,14 @@ async function loadTickets(force=false) {
   $id('tkt-empty').style.color='var(--text-dim)';
   $id('tkt-table').style.display='none';
   try {
-    // Fetch ALL items with pagination (no $orderby to avoid non-indexed column issues)
-    let items = [];
-    let nextUrl = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=999`;
     const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
-    while (nextUrl) {
-      const d = await gGet(nextUrl, prefer);
-      items = items.concat(d.value||[]);
-      // Follow @odata.nextLink for pagination
-      const nl = d['@odata.nextLink'] || d['odata.nextLink'];
-      nextUrl = nl ? nl.replace('https://graph.microsoft.com/v1.0','') : null;
-      console.log('[Tickets] loaded', items.length, 'so far, nextLink:', nl?'yes':'no');
-    }
-    // Sort client-side by ID descending (newest first)
-    items.sort((a,b)=>Number(b.id)-Number(a.id));
-    allTickets = items;
+    const d = await gGet(
+      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=500`,
+      prefer
+    );
+    allTickets = (d.value||[]).sort((a,b)=>Number(b.id)-Number(a.id));
+    console.log('[Tickets] loaded', allTickets.length, 'items');
+    buildFilterOptions(allTickets);
     renderTickets(allTickets);
   } catch(e) {
     $id('tkt-empty').textContent='Fehler: '+e.message;
@@ -601,19 +596,60 @@ function renderTickets(list) {
   });
 }
 
-function filterTickets() {
-  const q  = ($id('tkt-search').value||'').toLowerCase();
-  const st = $id('tkt-st').value;
-  const pr = $id('tkt-prio').value;
-  const colStatus=col(['Status'])||'Status';
-  const colPrio=col(['Priorität','Priority']);
-  renderTickets(allTickets.filter(it=>{
+function buildFilterOptions(tickets) {
+  const cKat  = getCol('category');
+  const cWerk = getCol('werk');
+  const cType = getCol('type');
+  const sets  = {kat:new Set(), werk:new Set(), art:new Set()};
+  tickets.forEach(it=>{
     const f=it.fields||{};
-    const text=JSON.stringify(f).toLowerCase();
-    return (!q||text.includes(q)) &&
-           (!st||(f[colStatus]||'').includes(st)) &&
-           (!pr||!colPrio||(f[colPrio]||'').includes(pr));
-  }));
+    if(cKat  && f[cKat])  sets.kat.add(String(f[cKat]));
+    if(cWerk && f[cWerk]) sets.werk.add(String(f[cWerk]));
+    if(cType && f[cType]) sets.art.add(String(f[cType]));
+  });
+  const fill=(id,set)=>{
+    const sel=$id(id); if(!sel) return;
+    const cur=sel.value;
+    sel.innerHTML='<option value="">'+sel.options[0].text+'</option>';
+    [...set].sort().forEach(v=>{ const o=document.createElement('option'); o.value=o.textContent=v; sel.appendChild(o); });
+    sel.value=cur;
+  };
+  fill('tkt-kat',sets.kat); fill('tkt-werk',sets.werk); fill('tkt-art',sets.art);
+}
+
+function filterTickets() {
+  const raw = ($id('tkt-search').value||'').trim();
+  const q   = raw.toLowerCase();
+  const st  = $id('tkt-st').value;
+  const pr  = $id('tkt-prio').value;
+  const kat = $id('tkt-kat')?.value||'';
+  const wrk = $id('tkt-werk')?.value||'';
+  const art = $id('tkt-art')?.value||'';
+  const cStatus = getCol('status')||'Status';
+  const cPrio   = getCol('prio');
+  const cKat    = getCol('category');
+  const cWerk   = getCol('werk');
+  const cType   = getCol('type');
+  const cTitle  = getCol('title')||'Title';
+
+  const filtered = allTickets.filter(it=>{
+    const f = it.fields||{};
+    // Search: match ID (strip #) or title
+    const idStr = String(it.id);
+    const titleStr = (f[cTitle]||f.Title||'').toLowerCase();
+    const searchOk = !q
+      || q.replace(/^#/,'') === idStr          // exact #ID
+      || idStr.includes(q.replace(/^#/,''))    // partial ID
+      || titleStr.includes(q);                  // title contains
+
+    return searchOk
+      && (!st  || (f[cStatus]||'').includes(st))
+      && (!pr  || !cPrio  || (f[cPrio] ||'').includes(pr))
+      && (!kat || !cKat   || (f[cKat]  ||'')===kat)
+      && (!wrk || !cWerk  || (f[cWerk] ||'')===wrk)
+      && (!art || !cType  || (f[cType] ||'')===art);
+  });
+  renderTickets(filtered);
 }
 
 function openTicketDetail(id) {
