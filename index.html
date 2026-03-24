@@ -490,7 +490,7 @@ async function loadTickets(force=false) {
     const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
     $id('tkt-empty').textContent='Lade neueste 100 Tickets…';
     const d = await gGet(
-      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100`,
+      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100&$orderby=id desc`,
       prefer
     );
     const page = d.value||[];
