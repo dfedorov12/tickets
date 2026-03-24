@@ -469,7 +469,7 @@ async function loadTickets(force=false) {
   $id('tkt-table').style.display='none';
   try {
     const d = await gGet(
-      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields,AttachmentFiles&$top=500&$orderby=createdDateTime desc`,
+      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=500&$orderby=createdDateTime desc`,
       {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'}
     );
     allTickets = d.value||[];
@@ -542,7 +542,7 @@ function renderTickets(list) {
     const type     = cType   ? f[cType]||''    : '';
     const email    = cEmail  ? f[cEmail]||''   : '';
     const progress = cProgress? f[cProgress]||'': '';
-    const atts     = (it.AttachmentFiles||[]).length;
+    const atts     = it._attachCount||0;
 
     const stk = status.toLowerCase().replace(/\s+/g,'');
     const stClass = stk.includes('neu')||stk.includes('offen')?'st-offen'
@@ -624,16 +624,10 @@ function openTicketDetail(id) {
       <input data-fk="${esc(k)}" value="${esc(valStr)}" style="font-size:12px;"/></div>`;
   });
 
-  // Attachments
-  const atts = it.AttachmentFiles||[];
-  if (atts.length) {
-    html+=`<div class="section-title">Anhänge</div><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">`;
-    atts.forEach(a=>{
-      const url=`https://dihag.sharepoint.com${a.ServerRelativeUrl||''}`;
-      html+=`<a href="${url}" target="_blank" class="attach-pill">📎 ${esc(a.FileName||'Anhang')}</a>`;
-    });
-    html+=`</div>`;
-  }
+  // Attachments — fetched via SP REST (Graph doesn't support AttachmentFiles expand)
+  html+=`<div class="section-title">Anhänge</div>
+    <div id="atts-${id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+      <span style="font-size:11px;color:var(--text-muted);">Lade…</span></div>`;
   html+=`<div class="section-title">Anhang hochladen</div>
     <label class="attach-pill" style="cursor:pointer;">
       ＋ Datei(en) wählen
@@ -650,6 +644,42 @@ function openTicketDetail(id) {
     <button class="btn btn-danger"  onclick="confirmDeleteTicket('${id}')">🗑</button>`;
 
   sidebar.classList.add('open');
+  // Fetch attachments async via SP REST
+  fetchTicketAttachments(id);
+}
+
+async function fetchTicketAttachments(id) {
+  const container = document.getElementById('atts-'+id);
+  if (!container) return;
+  try {
+    const spTok = await getSpToken();
+    const r = await fetch(
+      `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/items(${id})/AttachmentFiles`,
+      {headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=verbose'}}
+    );
+    const j = await r.json();
+    const files = j?.d?.results||j?.value||[];
+    // Update count in table row
+    const it = allTickets.find(t=>t.id==id);
+    if (it) it._attachCount = files.length;
+
+    container.innerHTML = '';
+    if (!files.length) {
+      container.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">Keine Anhänge</span>';
+      return;
+    }
+    files.forEach(a=>{
+      const url = a.ServerRelativeUrl
+        ? 'https://dihag.sharepoint.com'+a.ServerRelativeUrl
+        : (a.AbsoluteUri||'#');
+      const link = document.createElement('a');
+      link.href=url; link.target='_blank'; link.className='attach-pill';
+      link.textContent='📎 '+(a.FileName||'Anhang');
+      container.appendChild(link);
+    });
+  } catch(e) {
+    if (container) container.innerHTML='<span style="font-size:11px;color:var(--red);">'+esc(e.message)+'</span>';
+  }
 }
 
 function closeSidebar() { $id('tkt-sidebar').classList.remove('open'); editingId=null; }
