@@ -727,14 +727,39 @@ async function loadOlderTickets() {
     const page = d.value||[];
     allOlderNextUrl = d['@odata.nextLink']
       ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
-    allTickets = [...allTickets, ...page];
-    displayedCount = allTickets.length; // show all loaded so far
+    const prev = allTickets.length;
+    allTickets = [...allTickets, ...page].sort((a,b)=>Number(b.id)-Number(a.id));
+    const seen=new Set(); allTickets=allTickets.filter(t=>{if(seen.has(t.id))return false;seen.add(t.id);return true;});
     buildFilterOptions(allTickets);
-    renderTickets(allTickets);
+    displayedCount = allTickets.length;
+    renderTickets(filterActive()?applyFilters(allTickets):allTickets);
     $id('tkt-count').textContent = allTickets.length + ' Tickets';
     renderLoadMore();
-    toast(`+${page.length} ältere Tickets geladen`, 'success');
+    toast(`+${allTickets.length-prev} Tickets geladen`,'success');
   } catch(e) { toast('Fehler: '+e.message,'error'); }
+}
+
+async function loadAllBackground(prefer) {
+  // Load all remaining pages silently for search completeness
+  try {
+    let url = allOlderNextUrl;
+    while (url) {
+      const d = await gGet(url, prefer);
+      const page = d.value||[];
+      allTickets = [...allTickets, ...page];
+      url = d['@odata.nextLink']
+        ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+      allOlderNextUrl = url; // keep in sync
+    }
+    allTickets.sort((a,b)=>Number(b.id)-Number(a.id));
+    allTicketsComplete = true;
+    allOlderNextUrl = null;
+    buildFilterOptions(allTickets);
+    $id('tkt-count').textContent = allTickets.length + ' Tickets';
+    renderLoadMore();
+    if (filterActive()) filterTickets();
+    console.log('[Tickets] all loaded:', allTickets.length);
+  } catch(e) { console.warn('[Tickets] bg error:', e.message); }
 }
 
 
