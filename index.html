@@ -450,6 +450,8 @@ let ticketListId = null;
 let ticketCols   = {};   // internal → display
 let allTickets   = [];
 let editingId    = null;
+let allNextLink  = null;    // next page URL
+let allTicketsComplete = false; // all pages fetched
 
 async function initTickets() {
   try {
@@ -486,14 +488,22 @@ async function loadTickets(force=false) {
   $id('tkt-table').style.display='none';
   try {
     const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
+    $id('tkt-empty').textContent='Lade neueste 100 Tickets…';
     const d = await gGet(
-      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=500`,
+      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100`,
       prefer
     );
-    allTickets = (d.value||[]).sort((a,b)=>Number(b.id)-Number(a.id));
-    console.log('[Tickets] loaded', allTickets.length, 'items');
+    const page = d.value||[];
+    allNextLink = d['@odata.nextLink']
+      ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+    allTickets = page.sort((a,b)=>Number(b.id)-Number(a.id));
+    allTicketsComplete = false;
+    console.log('[Tickets] loaded', allTickets.length, 'nextLink:', allNextLink?'yes':'no');
     buildFilterOptions(allTickets);
-    renderTickets(allTickets);
+    renderTickets(filterActive() ? applyFilters(allTickets) : allTickets);
+    renderLoadMore();
+    // Load all remaining pages silently in background
+    if (allNextLink) loadAllForSearch();
   } catch(e) {
     $id('tkt-empty').textContent='Fehler: '+e.message;
     $id('tkt-empty').style.color='var(--red)';
@@ -596,6 +606,98 @@ function renderTickets(list) {
   });
 }
 
+// Check if any filter is active
+function filterActive() {
+  return !!($id('tkt-search').value || $id('tkt-st').value || $id('tkt-prio').value ||
+            $id('tkt-kat')?.value || $id('tkt-werk')?.value || $id('tkt-art')?.value);
+}
+
+// Load next page
+async function loadMore() {
+  if (!allNextLink) return;
+  const btn = $id('btn-load-more');
+  if (btn) { btn.disabled=true; btn.textContent='Lade…'; }
+  try {
+    const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
+    const d = await gGet(allNextLink, prefer);
+    const page = d.value||[];
+    allNextLink = d['@odata.nextLink']
+      ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+    if (!allNextLink) allTicketsComplete = true;
+    allTickets = [...allTickets, ...page].sort((a,b)=>Number(b.id)-Number(a.id));
+    buildFilterOptions(allTickets);
+    const filtered = filterActive() ? applyFilters(allTickets) : allTickets;
+    renderTickets(filtered);
+    renderLoadMore();
+    toast(`+${page.length} Tickets geladen (${allTickets.length} gesamt)`,'success');
+  } catch(e) { toast('Fehler: '+e.message,'error'); }
+}
+
+// Load ALL remaining pages for search
+async function loadAllForSearch() {
+  if (allTicketsComplete || !allNextLink) return;
+  try {
+    const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
+    while (allNextLink) {
+      const d = await gGet(allNextLink, prefer);
+      allTickets = [...allTickets, ...(d.value||[])];
+      allNextLink = d['@odata.nextLink']
+        ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+    }
+    allTicketsComplete = true;
+    allTickets.sort((a,b)=>Number(b.id)-Number(a.id));
+    buildFilterOptions(allTickets);
+    // Update count display and remove load-more button
+    $id('tkt-count').textContent = allTickets.length + ' Tickets';
+    const btn = $id('btn-load-more');
+    if (btn) btn.remove();
+    console.log('[Tickets] background load complete:', allTickets.length, 'total');
+    // If a filter is active, refresh results with full dataset
+    if (filterActive()) filterTickets();
+  } catch(e) { console.warn('[Tickets] background load error:', e.message); }
+}
+
+function renderLoadMore() {
+  // Remove existing
+  const old = $id('btn-load-more');
+  if (old) old.parentElement.removeChild(old);
+  if (!allNextLink) return;
+  const btn = document.createElement('button');
+  btn.id = 'btn-load-more';
+  btn.style.cssText = 'display:block;margin:16px auto;padding:9px 28px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;';
+  btn.textContent = '＋ Weitere 100 laden';
+  btn.onclick = loadMore;
+  $id('tkt-table-wrap').appendChild(btn);
+}
+
+function applyFilters(list) {
+  const raw  = ($id('tkt-search').value||'').trim();
+  const q    = raw.toLowerCase();
+  const st   = $id('tkt-st').value;
+  const pr   = $id('tkt-prio').value;
+  const kat  = $id('tkt-kat')?.value||'';
+  const wrk  = $id('tkt-werk')?.value||'';
+  const art  = $id('tkt-art')?.value||'';
+  const cStatus=getCol('status')||'Status';
+  const cPrio  =getCol('prio');
+  const cKat   =getCol('category');
+  const cWerk  =getCol('werk');
+  const cType  =getCol('type');
+  const cTitle =getCol('title')||'Title';
+  return list.filter(it=>{
+    const f=it.fields||{};
+    const idStr=String(it.id);
+    const titleStr=(f[cTitle]||f.Title||'').toLowerCase();
+    const searchOk=!q||(q.replace(/^#/,'')===idStr)||(idStr.includes(q.replace(/^#/,'')))||titleStr.includes(q);
+    return searchOk
+      &&(!st||(f[cStatus]||'').includes(st))
+      &&(!pr||!cPrio||(f[cPrio]||'').includes(pr))
+      &&(!kat||!cKat||(f[cKat]||'')===kat)
+      &&(!wrk||!cWerk||(f[cWerk]||'')===wrk)
+      &&(!art||!cType||(f[cType]||'')===art);
+  });
+}
+
 function buildFilterOptions(tickets) {
   const cKat  = getCol('category');
   const cWerk = getCol('werk');
@@ -618,38 +720,9 @@ function buildFilterOptions(tickets) {
 }
 
 function filterTickets() {
-  const raw = ($id('tkt-search').value||'').trim();
-  const q   = raw.toLowerCase();
-  const st  = $id('tkt-st').value;
-  const pr  = $id('tkt-prio').value;
-  const kat = $id('tkt-kat')?.value||'';
-  const wrk = $id('tkt-werk')?.value||'';
-  const art = $id('tkt-art')?.value||'';
-  const cStatus = getCol('status')||'Status';
-  const cPrio   = getCol('prio');
-  const cKat    = getCol('category');
-  const cWerk   = getCol('werk');
-  const cType   = getCol('type');
-  const cTitle  = getCol('title')||'Title';
-
-  const filtered = allTickets.filter(it=>{
-    const f = it.fields||{};
-    // Search: match ID (strip #) or title
-    const idStr = String(it.id);
-    const titleStr = (f[cTitle]||f.Title||'').toLowerCase();
-    const searchOk = !q
-      || q.replace(/^#/,'') === idStr          // exact #ID
-      || idStr.includes(q.replace(/^#/,''))    // partial ID
-      || titleStr.includes(q);                  // title contains
-
-    return searchOk
-      && (!st  || (f[cStatus]||'').includes(st))
-      && (!pr  || !cPrio  || (f[cPrio] ||'').includes(pr))
-      && (!kat || !cKat   || (f[cKat]  ||'')===kat)
-      && (!wrk || !cWerk  || (f[cWerk] ||'')===wrk)
-      && (!art || !cType  || (f[cType] ||'')===art);
-  });
+  const filtered = applyFilters(allTickets);
   renderTickets(filtered);
+  if (!filterActive()) renderLoadMore();
 }
 
 function openTicketDetail(id) {
