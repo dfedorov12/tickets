@@ -450,8 +450,10 @@ let ticketListId = null;
 let ticketCols   = {};   // internal → display
 let allTickets   = [];
 let editingId    = null;
-let allNextLink  = null;    // next page URL
-let allTicketsComplete = false; // all pages fetched
+let allNextLink  = null;
+let allTicketsComplete = false;
+let allPrevSkip = 0;
+let totalTicketCount = 0;
 
 async function initTickets() {
   try {
@@ -490,26 +492,34 @@ async function loadTickets(force=false) {
     const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
     $id('tkt-empty').textContent='Lade Tickets…';
 
-    // Fetch all items at once (no $orderby to avoid SP threshold)
-    // SP returns in ascending ID order → we reverse for newest-first
-    let allItems = [];
-    let nextUrl = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=1000`;
-    while (nextUrl) {
-      const d = await gGet(nextUrl, prefer);
-      allItems = allItems.concat(d.value||[]);
-      nextUrl = d['@odata.nextLink']
-        ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
-    }
+    // Step 1: Get total count to calculate skip
+    const countResp = await gGet(
+      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$top=1&$count=true`,
+      prefer
+    );
+    const totalCount = countResp['@odata.count'] || 0;
+    console.log('[Tickets] total count:', totalCount);
 
-    // Sort descending by ID (newest first)
-    allItems.sort((a,b) => Number(b.id) - Number(a.id));
-    allTickets = allItems;
-    allTicketsComplete = true;
+    // Step 2: Skip to the last 100 (highest IDs)
+    const skip = Math.max(0, totalCount - 100);
+    const first = await gGet(
+      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100&$skip=${skip}`,
+      prefer
+    );
+    const firstPage = first.value||[];
+    allTicketsComplete = false;
     allNextLink = null;
-    console.log('[Tickets] loaded all', allTickets.length, 'tickets');
+    allPrevSkip = skip; // track where we are for loading older tickets
+
+    // SP returns ascending → reverse so highest ID is first
+    allTickets = [...firstPage].sort((a,b)=>Number(b.id)-Number(a.id));
+    totalTicketCount = totalCount;
     buildFilterOptions(allTickets);
-    renderTickets(filterActive() ? applyFilters(allTickets) : allTickets.slice(0,100));
+    renderTickets(allTickets);
     renderLoadMore();
+
+    // Load rest in background for search
+    loadRemainingInBackground(prefer, skip);
   } catch(e) {
     $id('tkt-empty').textContent='Fehler: '+e.message;
     $id('tkt-empty').style.color='var(--red)';
@@ -670,18 +680,69 @@ async function loadAllForSearch() {
 
 let displayedCount = 100;
 
+async function loadRemainingInBackground(prefer, startSkip) {
+  // Silently load all older pages for search completeness
+  try {
+    let skip = startSkip;
+    while (skip > 0) {
+      const batchSkip = Math.max(0, skip - 500);
+      const d = await gGet(
+        `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=500&$skip=${batchSkip}`,
+        prefer
+      );
+      const page = d.value||[];
+      allTickets = [...allTickets, ...page];
+      // Deduplicate
+      const seen = new Set(); allTickets = allTickets.filter(t=>{if(seen.has(t.id))return false;seen.add(t.id);return true;});
+      skip = batchSkip;
+      buildFilterOptions(allTickets);
+      if (skip === 0) break;
+    }
+    allTicketsComplete = true;
+    allPrevSkip = 0;
+    allTickets.sort((a,b)=>Number(b.id)-Number(a.id));
+    buildFilterOptions(allTickets);
+    $id('tkt-count').textContent = allTickets.length + ' Tickets';
+    renderLoadMore();
+    console.log('[Tickets] bg complete:', allTickets.length);
+    if (filterActive()) filterTickets();
+  } catch(e) { console.warn('[Tickets] bg error:', e.message); }
+}
+
 function renderLoadMore() {
   const old = $id('btn-load-more');
   if (old) old.remove();
-  if (!allTicketsComplete) return;
-  const list = filterActive() ? applyFilters(allTickets) : allTickets;
-  if (displayedCount >= list.length) return;
+  // Show "load older" if there are tickets before our current skip position
+  if (filterActive() || allPrevSkip <= 0) return;
   const btn = document.createElement('button');
   btn.id = 'btn-load-more';
   btn.style.cssText = 'display:block;margin:16px auto;padding:9px 28px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;';
-  btn.textContent = `＋ Weitere 100 laden (${list.length - displayedCount} verbleibend)`;
-  btn.onclick = () => { displayedCount += 100; renderTickets(list.slice(0, displayedCount)); renderLoadMore(); };
+  btn.textContent = `＋ Ältere 100 laden (${allPrevSkip} weitere)`;
+  btn.onclick = loadOlder;
   $id('tkt-table-wrap').appendChild(btn);
+}
+
+async function loadOlder() {
+  const btn = $id('btn-load-more');
+  if (btn) { btn.disabled=true; btn.textContent='Lade…'; }
+  const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
+  const newSkip = Math.max(0, allPrevSkip - 100);
+  try {
+    const d = await gGet(
+      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100&$skip=${newSkip}`,
+      prefer
+    );
+    const page = d.value||[];
+    allPrevSkip = newSkip;
+    // Append older tickets and re-sort
+    allTickets = [...allTickets, ...page].sort((a,b)=>Number(b.id)-Number(a.id));
+    // Deduplicate
+    const seen = new Set();
+    allTickets = allTickets.filter(t=>{ if(seen.has(t.id)) return false; seen.add(t.id); return true; });
+    buildFilterOptions(allTickets);
+    renderTickets(allTickets);
+    renderLoadMore();
+  } catch(e) { toast('Fehler: '+e.message,'error'); }
 }
 
 function applyFilters(list) {
