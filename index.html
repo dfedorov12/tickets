@@ -454,12 +454,17 @@ async function initTickets() {
     $id('tkt-empty').textContent='Verbinde mit Ticket-System…';
     const site = await gGet(`/sites/${TICKET_SITE}`);
     ticketSiteId = site.id;
-    const lists = await gGet(`/sites/${ticketSiteId}/lists?$select=id,name,displayName&$top=50`);
+    const lists = await gGet(`/sites/${ticketSiteId}/lists?$select=id,name,displayName&$top=100`);
+    console.log('[Tickets] All lists:', (lists.value||[]).map(l=>`${l.displayName}(${l.name})`).join(', '));
+    // Use exact list name "Tickets" from the URL (AllItems.aspx shows this is the real list)
     const lst = (lists.value||[]).find(l=>
+      l.displayName==='Tickets' || l.name==='Tickets'
+    ) || (lists.value||[]).find(l=>
       l.name.toLowerCase().includes('ticket') || l.displayName.toLowerCase().includes('ticket')
     );
-    if (!lst) throw new Error('Ticket-Liste nicht gefunden auf dihag.sharepoint.com/sites/ticket');
+    if (!lst) throw new Error('Liste "Tickets" nicht gefunden. Verfügbar: '+(lists.value||[]).map(l=>l.displayName).join(', '));
     ticketListId = lst.id;
+    console.log('[Tickets] Using list:', lst.displayName, '/', lst.name, 'ID:', lst.id);
     const cols = await gGet(`/sites/${ticketSiteId}/lists/${ticketListId}/columns?$top=200`);
     (cols.value||[]).forEach(c=>{ if(!c.readOnly) ticketCols[c.name]=c.displayName; });
     console.log('[Tickets] cols:', Object.entries(ticketCols).map(([k,v])=>`${k}=${v}`).join(', '));
@@ -486,9 +491,9 @@ async function loadTickets(force=false) {
       const d = await gGet(nextUrl, prefer);
       items = items.concat(d.value||[]);
       // Follow @odata.nextLink for pagination
-      nextUrl = d['@odata.nextLink']
-        ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','')
-        : null;
+      const nl = d['@odata.nextLink'] || d['odata.nextLink'];
+      nextUrl = nl ? nl.replace('https://graph.microsoft.com/v1.0','') : null;
+      console.log('[Tickets] loaded', items.length, 'so far, nextLink:', nl?'yes':'no');
     }
     // Sort client-side by ID descending (newest first)
     items.sort((a,b)=>Number(b.id)-Number(a.id));
@@ -536,7 +541,7 @@ function renderTickets(list) {
     $id('tkt-table').style.display='none'; $id('tkt-count').textContent=''; return;
   }
   $id('tkt-empty').style.display='none'; $id('tkt-table').style.display='table';
-  $id('tkt-count').textContent=list.length+' Tickets';
+  $id('tkt-count').textContent=list.length+' von '+allTickets.length+' Tickets';
 
   // Use known column mapping
   const cTitle    = getCol('title')    ||'Title';
