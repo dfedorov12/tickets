@@ -501,7 +501,7 @@ async function loadTickets(force=false) {
     const since = new Date();
     since.setMonth(since.getMonth() - 2);
     const sinceISO = since.toISOString();
-    let nextUrl = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=200&$filter=createdDateTime ge ${sinceISO}&$orderby=createdDateTime desc`;
+    let nextUrl = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=200&$filter=createdDateTime ge ${sinceISO}`;
     let pageNum = 0;
     allTickets = [];
     allTicketsComplete = false;
