@@ -454,6 +454,7 @@ let allNextLink  = null;
 let allTicketsComplete = false;
 let allPrevSkip = 0;
 let totalTicketCount = 0;
+let allOlderNextUrl = null;
 
 async function initTickets() {
   try {
@@ -492,34 +493,44 @@ async function loadTickets(force=false) {
     const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
     $id('tkt-empty').textContent='Lade Tickets…';
 
-    // Step 1: Get total count to calculate skip
-    const countResp = await gGet(
-      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$top=1&$count=true`,
-      prefer
-    );
-    const totalCount = countResp['@odata.count'] || 0;
-    console.log('[Tickets] total count:', totalCount);
-
-    // Step 2: Skip to the last 100 (highest IDs)
-    const skip = Math.max(0, totalCount - 100);
-    const first = await gGet(
-      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100&$skip=${skip}`,
-      prefer
-    );
-    const firstPage = first.value||[];
+    // SP Graph doesn't support $count, $skip, or $orderby on large lists.
+    // Strategy: follow nextLink pages, accumulate all, then sort by ID desc.
+    // Show progress as pages arrive so user sees tickets quickly.
+    $id('tkt-empty').textContent = 'Lade Tickets…';
+    // Filter last 2 months — 'Created' is indexed, safe from threshold
+    const since = new Date();
+    since.setMonth(since.getMonth() - 2);
+    const sinceISO = since.toISOString();
+    let nextUrl = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=200&$filter=createdDateTime ge ${sinceISO}&$orderby=createdDateTime desc`;
+    let pageNum = 0;
+    allTickets = [];
     allTicketsComplete = false;
-    allNextLink = null;
-    allPrevSkip = skip; // track where we are for loading older tickets
 
-    // SP returns ascending → reverse so highest ID is first
-    allTickets = [...firstPage].sort((a,b)=>Number(b.id)-Number(a.id));
-    totalTicketCount = totalCount;
+    while (nextUrl) {
+      const d = await gGet(nextUrl, prefer);
+      const page = d.value || [];
+      allTickets = [...allTickets, ...page];
+      pageNum++;
+      nextUrl = d['@odata.nextLink']
+        ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+
+      // After first page: show newest so far (reverse = highest IDs last loaded)
+      if (pageNum === 1) {
+        allTickets.sort((a,b)=>Number(b.id)-Number(a.id));
+        buildFilterOptions(allTickets);
+        renderTickets(allTickets.slice(0, 100));
+        $id('tkt-count').textContent = allTickets.length + '+ Tickets (lädt…)';
+      }
+    }
+
+    // All loaded — final sort
+    allTickets.sort((a,b)=>Number(b.id)-Number(a.id));
+    allTicketsComplete = true;
+    allPrevSkip = 0;
     buildFilterOptions(allTickets);
-    renderTickets(allTickets);
+    renderTickets(filterActive() ? applyFilters(allTickets) : allTickets.slice(0, displayedCount));
     renderLoadMore();
-
-    // Load rest in background for search
-    loadRemainingInBackground(prefer, skip);
+    console.log('[Tickets] all loaded:', allTickets.length);
   } catch(e) {
     $id('tkt-empty').textContent='Fehler: '+e.message;
     $id('tkt-empty').style.color='var(--red)';
@@ -680,70 +691,52 @@ async function loadAllForSearch() {
 
 let displayedCount = 100;
 
-async function loadRemainingInBackground(prefer, startSkip) {
-  // Silently load all older pages for search completeness
-  try {
-    let skip = startSkip;
-    while (skip > 0) {
-      const batchSkip = Math.max(0, skip - 500);
-      const d = await gGet(
-        `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=500&$skip=${batchSkip}`,
-        prefer
-      );
-      const page = d.value||[];
-      allTickets = [...allTickets, ...page];
-      // Deduplicate
-      const seen = new Set(); allTickets = allTickets.filter(t=>{if(seen.has(t.id))return false;seen.add(t.id);return true;});
-      skip = batchSkip;
-      buildFilterOptions(allTickets);
-      if (skip === 0) break;
-    }
-    allTicketsComplete = true;
-    allPrevSkip = 0;
-    allTickets.sort((a,b)=>Number(b.id)-Number(a.id));
-    buildFilterOptions(allTickets);
-    $id('tkt-count').textContent = allTickets.length + ' Tickets';
-    renderLoadMore();
-    console.log('[Tickets] bg complete:', allTickets.length);
-    if (filterActive()) filterTickets();
-  } catch(e) { console.warn('[Tickets] bg error:', e.message); }
-}
 
 function renderLoadMore() {
   const old = $id('btn-load-more');
   if (old) old.remove();
-  // Show "load older" if there are tickets before our current skip position
-  if (filterActive() || allPrevSkip <= 0) return;
-  const btn = document.createElement('button');
-  btn.id = 'btn-load-more';
-  btn.style.cssText = 'display:block;margin:16px auto;padding:9px 28px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;';
-  btn.textContent = `＋ Ältere 100 laden (${allPrevSkip} weitere)`;
-  btn.onclick = loadOlder;
-  $id('tkt-table-wrap').appendChild(btn);
+  if (filterActive()) return;
+
+  // Show current page in-list + button for older
+  if (displayedCount < allTickets.length) {
+    // More pages in current batch
+    const btn = document.createElement('button');
+    btn.id = 'btn-load-more';
+    btn.style.cssText = 'display:block;margin:16px auto;padding:9px 28px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;';
+    btn.textContent = `＋ ${Math.min(100, allTickets.length - displayedCount)} weitere anzeigen`;
+    btn.onclick = () => { displayedCount += 100; renderTickets(allTickets.slice(0, displayedCount)); renderLoadMore(); };
+    $id('tkt-table-wrap').appendChild(btn);
+  } else if (allOlderNextUrl) {
+    // Load older from SP
+    const btn = document.createElement('button');
+    btn.id = 'btn-load-more';
+    btn.style.cssText = 'display:block;margin:16px auto;padding:9px 28px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;';
+    btn.textContent = '＋ 100 ältere Tickets laden';
+    btn.onclick = loadOlderTickets;
+    $id('tkt-table-wrap').appendChild(btn);
+  }
 }
 
-async function loadOlder() {
+async function loadOlderTickets() {
+  if (!allOlderNextUrl) return;
   const btn = $id('btn-load-more');
   if (btn) { btn.disabled=true; btn.textContent='Lade…'; }
   const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
-  const newSkip = Math.max(0, allPrevSkip - 100);
   try {
-    const d = await gGet(
-      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100&$skip=${newSkip}`,
-      prefer
-    );
+    const d = await gGet(allOlderNextUrl, prefer);
     const page = d.value||[];
-    allPrevSkip = newSkip;
-    // Append older tickets and re-sort
-    allTickets = [...allTickets, ...page].sort((a,b)=>Number(b.id)-Number(a.id));
-    // Deduplicate
-    const seen = new Set();
-    allTickets = allTickets.filter(t=>{ if(seen.has(t.id)) return false; seen.add(t.id); return true; });
+    allOlderNextUrl = d['@odata.nextLink']
+      ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+    allTickets = [...allTickets, ...page];
+    displayedCount = allTickets.length; // show all loaded so far
     buildFilterOptions(allTickets);
     renderTickets(allTickets);
+    $id('tkt-count').textContent = allTickets.length + ' Tickets';
     renderLoadMore();
+    toast(`+${page.length} ältere Tickets geladen`, 'success');
   } catch(e) { toast('Fehler: '+e.message,'error'); }
 }
+
 
 function applyFilters(list) {
   const raw  = ($id('tkt-search').value||'').trim();
