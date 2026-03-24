@@ -321,8 +321,18 @@ const $id = id => document.getElementById(id);
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const fieldStr = v => {
   if (!v) return '';
-  if (typeof v === 'string') return v;
-  if (typeof v === 'object') return v.LookupValue||v.displayName||v.Title||v.Email||JSON.stringify(v);
+  if (typeof v === 'string') {
+    // Parse JSON arrays that SP sometimes returns as strings
+    if (v.startsWith('[')) {
+      try {
+        const arr = JSON.parse(v);
+        return arr.map(x=>x.LookupValue||x.displayName||x.Title||x.Email||'').filter(Boolean).join(', ');
+      } catch {}
+    }
+    return v;
+  }
+  if (Array.isArray(v)) return v.map(x=>x.LookupValue||x.displayName||x.Title||x.Email||String(x)).filter(Boolean).join(', ');
+  if (typeof v === 'object') return v.LookupValue||v.displayName||v.Title||v.Email||'';
   return String(v);
 };
 const fmt = s => s ? new Date(s).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit'}) : '';
@@ -468,11 +478,21 @@ async function loadTickets(force=false) {
   $id('tkt-empty').style.color='var(--text-dim)';
   $id('tkt-table').style.display='none';
   try {
-    const d = await gGet(
-      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=500&$orderby=createdDateTime desc`,
-      {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'}
-    );
-    allTickets = d.value||[];
+    // Fetch ALL items with pagination (no $orderby to avoid non-indexed column issues)
+    let items = [];
+    let nextUrl = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=999`;
+    const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
+    while (nextUrl) {
+      const d = await gGet(nextUrl, prefer);
+      items = items.concat(d.value||[]);
+      // Follow @odata.nextLink for pagination
+      nextUrl = d['@odata.nextLink']
+        ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','')
+        : null;
+    }
+    // Sort client-side by ID descending (newest first)
+    items.sort((a,b)=>Number(b.id)-Number(a.id));
+    allTickets = items;
     renderTickets(allTickets);
   } catch(e) {
     $id('tkt-empty').textContent='Fehler: '+e.message;
