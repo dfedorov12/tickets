@@ -488,22 +488,28 @@ async function loadTickets(force=false) {
   $id('tkt-table').style.display='none';
   try {
     const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
-    $id('tkt-empty').textContent='Lade neueste 100 Tickets…';
-    const d = await gGet(
-      `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100&$orderby=createdDateTime desc`,
-      prefer
-    );
-    const page = d.value||[];
-    allNextLink = d['@odata.nextLink']
-      ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
-    allTickets = page.sort((a,b)=>Number(b.id)-Number(a.id));
-    allTicketsComplete = false;
-    console.log('[Tickets] loaded', allTickets.length, 'nextLink:', allNextLink?'yes':'no');
+    $id('tkt-empty').textContent='Lade Tickets…';
+
+    // Fetch all items at once (no $orderby to avoid SP threshold)
+    // SP returns in ascending ID order → we reverse for newest-first
+    let allItems = [];
+    let nextUrl = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=1000`;
+    while (nextUrl) {
+      const d = await gGet(nextUrl, prefer);
+      allItems = allItems.concat(d.value||[]);
+      nextUrl = d['@odata.nextLink']
+        ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+    }
+
+    // Sort descending by ID (newest first)
+    allItems.sort((a,b) => Number(b.id) - Number(a.id));
+    allTickets = allItems;
+    allTicketsComplete = true;
+    allNextLink = null;
+    console.log('[Tickets] loaded all', allTickets.length, 'tickets');
     buildFilterOptions(allTickets);
-    renderTickets(filterActive() ? applyFilters(allTickets) : allTickets);
+    renderTickets(filterActive() ? applyFilters(allTickets) : allTickets.slice(0,100));
     renderLoadMore();
-    // Load all remaining pages silently in background
-    if (allNextLink) loadAllForSearch();
   } catch(e) {
     $id('tkt-empty').textContent='Fehler: '+e.message;
     $id('tkt-empty').style.color='var(--red)';
@@ -546,7 +552,8 @@ function renderTickets(list) {
     $id('tkt-table').style.display='none'; $id('tkt-count').textContent=''; return;
   }
   $id('tkt-empty').style.display='none'; $id('tkt-table').style.display='table';
-  $id('tkt-count').textContent=list.length+' von '+allTickets.length+' Tickets';
+  const total = allTickets.length;
+  $id('tkt-count').textContent=list.length+(total>list.length?' von '+total:'')+' Tickets';
 
   // Use known column mapping
   const cTitle    = getCol('title')    ||'Title';
@@ -619,7 +626,9 @@ async function loadMore() {
   if (btn) { btn.disabled=true; btn.textContent='Lade…'; }
   try {
     const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
-    const d = await gGet(allNextLink, prefer);
+    // Strip any $orderby from nextLink to avoid threshold
+      const cleanLink = allNextLink.replace(/&\$orderby=[^&]*/,'').replace(/\?\$orderby=[^&]*/,'?');
+      const d = await gGet(cleanLink, prefer);
     const page = d.value||[];
     allNextLink = d['@odata.nextLink']
       ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
@@ -639,7 +648,9 @@ async function loadAllForSearch() {
   try {
     const prefer = {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'};
     while (allNextLink) {
-      const d = await gGet(allNextLink, prefer);
+      // Strip any $orderby from nextLink to avoid threshold
+      const cleanLink = allNextLink.replace(/&\$orderby=[^&]*/,'').replace(/\?\$orderby=[^&]*/,'?');
+      const d = await gGet(cleanLink, prefer);
       allTickets = [...allTickets, ...(d.value||[])];
       allNextLink = d['@odata.nextLink']
         ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
@@ -657,16 +668,19 @@ async function loadAllForSearch() {
   } catch(e) { console.warn('[Tickets] background load error:', e.message); }
 }
 
+let displayedCount = 100;
+
 function renderLoadMore() {
-  // Remove existing
   const old = $id('btn-load-more');
-  if (old) old.parentElement.removeChild(old);
-  if (!allNextLink) return;
+  if (old) old.remove();
+  if (!allTicketsComplete) return;
+  const list = filterActive() ? applyFilters(allTickets) : allTickets;
+  if (displayedCount >= list.length) return;
   const btn = document.createElement('button');
   btn.id = 'btn-load-more';
   btn.style.cssText = 'display:block;margin:16px auto;padding:9px 28px;background:var(--navy);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;';
-  btn.textContent = '＋ Weitere 100 laden';
-  btn.onclick = loadMore;
+  btn.textContent = `＋ Weitere 100 laden (${list.length - displayedCount} verbleibend)`;
+  btn.onclick = () => { displayedCount += 100; renderTickets(list.slice(0, displayedCount)); renderLoadMore(); };
   $id('tkt-table-wrap').appendChild(btn);
 }
 
@@ -720,9 +734,15 @@ function buildFilterOptions(tickets) {
 }
 
 function filterTickets() {
-  const filtered = applyFilters(allTickets);
-  renderTickets(filtered);
-  if (!filterActive()) renderLoadMore();
+  displayedCount = 100;
+  if (filterActive()) {
+    const filtered = applyFilters(allTickets);
+    renderTickets(filtered);
+    renderLoadMore();
+  } else {
+    renderTickets(allTickets.slice(0, displayedCount));
+    renderLoadMore();
+  }
 }
 
 function openTicketDetail(id) {
