@@ -354,41 +354,34 @@ function toast(msg,type='info'){
 let msalApp, account;
 
 async function initAuth() {
-  // Clear stale MSAL state
-  try {
-    Object.keys(sessionStorage)
-      .filter(k=>k.includes('msal')||k.includes('login')||k.includes('interaction'))
-      .forEach(k=>sessionStorage.removeItem(k));
-  } catch {}
-
   const cfg = {
-    auth: {
-      clientId:    CLIENT_ID,
-      authority:  `https://login.microsoftonline.com/${TENANT_ID}`,
-      redirectUri: 'https://dfedorov12.github.io/tickets/'
-    },
-    cache: { cacheLocation:'localStorage', storeAuthStateInCookie:false }
+    auth:{ clientId:CLIENT_ID, authority:`https://login.microsoftonline.com/${TENANT_ID}`,
+           redirectUri: 'https://dfedorov12.github.io/tickets/' },
+    cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:true }
   };
   msalApp = new msal.PublicClientApplication(cfg);
   await msalApp.initialize();
-  try { await msalApp.handleRedirectPromise(); } catch {}
+  await msalApp.handleRedirectPromise();
   const accounts = msalApp.getAllAccounts();
-  if (accounts.length > 0) { account = accounts[0]; return true; }
+  if (accounts.length) {
+    account = accounts[0];
+    return true;
+  }
   return false;
 }
 
 async function doLogin() {
-  $id('boot-btn').style.display = 'none';
-  $id('boot-sub').textContent = 'Popup öffnet sich…';
+  $id('boot-btn').style.display='none';
+  $id('boot-sub').textContent='Anmeldung läuft…';
   try {
-    const r = await msalApp.loginPopup({ scopes:SCOPES, prompt:'select_account' });
+    const r = await msalApp.loginPopup({scopes:SCOPES});
     account = r.account;
     bootDone();
   } catch(e) {
     $id('boot-err').textContent = e.message;
-    $id('boot-err').style.display = 'block';
-    $id('boot-btn').textContent = 'Erneut versuchen';
-    $id('boot-btn').style.display = 'block';
+    $id('boot-err').style.display='block';
+    $id('boot-btn').style.display='block';
+    $id('boot-btn').textContent='Erneut versuchen';
   }
 }
 
@@ -486,164 +479,43 @@ async function initTickets() {
 }
 
 async function streamTickets() {
-  allTickets=[]; allTicketsComplete=false; displayedCount=100;
+  allTickets=[]; allTicketsComplete=false; allOlderNextUrl=null; displayedCount=100;
   $id('tkt-empty').style.display='block';
+  $id('tkt-empty').textContent='Lade Tickets…';
   $id('tkt-table').style.display='none';
-
-  // ── DEBUG OVERLAY ────────────────────────────────────────────────
-  let dbgEl = $id('stream-dbg');
-  if (!dbgEl) {
-    dbgEl = document.createElement('div');
-    dbgEl.id = 'stream-dbg';
-    dbgEl.style.cssText = 'position:fixed;bottom:10px;right:10px;width:460px;max-height:320px;overflow:auto;background:#0a1f3c;color:#7dd3fc;font-size:11px;font-family:monospace;padding:12px;border-radius:8px;z-index:99999;white-space:pre-wrap;';
-    const cb = document.createElement('button');
-    cb.textContent='✕'; cb.style.cssText='position:sticky;top:0;float:right;background:none;border:none;color:#fff;cursor:pointer;font-size:14px;';
-    cb.onclick=()=>dbgEl.remove(); dbgEl.appendChild(cb);
-    document.body.appendChild(dbgEl);
-  }
-  const dbgLines = [];
-  const dbg = (...a) => {
-    const s = a.join(' ');
-    console.log('[TKT]', s);
-    dbgLines.push(s);
-    dbgEl.childNodes[1] ? dbgEl.childNodes[1].textContent = dbgLines.join('\n')
-      : dbgEl.appendChild(document.createTextNode(dbgLines.join('\n')));
-  };
-  dbg('=== streamTickets START ===');
-  dbg('ticketSiteId:', ticketSiteId||'MISSING');
-  dbg('ticketListId:', ticketListId||'MISSING');
-  // ────────────────────────────────────────────────────────────────
-
-  const CACHE_KEY = `tkt_cache_${ticketListId}`;
-  const CACHE_TS  = `tkt_cache_ts_${ticketListId}`;
-  const CACHE_AGE = 5 * 60 * 1000; // 5 min
-
-  // ── Show cached data instantly ──────────────────────────────────
+  let url=`/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100`;
   try {
-    const cached = localStorage.getItem(CACHE_KEY);
-    const ts     = Number(localStorage.getItem(CACHE_TS)||0);
-    if (cached && Date.now()-ts < CACHE_AGE) {
-      dbg('Cache HIT:', JSON.parse(cached).length, 'tickets, age:', Math.round((Date.now()-ts)/1000)+'s');
-      allTickets = JSON.parse(cached);
-      buildFilterOptions(allTickets);
-      renderTickets(allTickets.slice(0, displayedCount));
-      $id('tkt-count').textContent = allTickets.length + ' Tickets (Cache)';
-      $id('tkt-empty').style.display = 'none';
-      allTicketsComplete = true;
-      renderLoadMore();
-      console.log('[Tickets] served from cache:', allTickets.length);
-      // Refresh in background silently
-      refreshInBackground(CACHE_KEY, CACHE_TS);
-      return;
-    }
-  } catch {}
-
-  // ── No cache: fetch first page, show immediately ────────────────
-  const base = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=500`;
-
-  $id('tkt-empty').textContent = 'Lade…';
-  try {
-    dbg('base URL:', base);
-    // Fetch first page
-    const first = await gGet(base);
-    dbg('First page: ', (first.value||[]).length, 'items, nextLink:', first['@odata.nextLink']?'YES':'NO');
-    allTickets = first.value||[];
-    allTickets.sort((a,b)=>Number(b.id)-Number(a.id));
-    buildFilterOptions(allTickets);
-    renderTickets(allTickets.slice(0, displayedCount));
-    $id('tkt-count').textContent = allTickets.length + '+ Tickets';
-    $id('tkt-empty').style.display = 'none';
-
-    // Collect all nextLinks by pre-fetching pages in parallel batches
-    let nextUrl = first['@odata.nextLink']
-      ? first['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
-
-    while (nextUrl) {
-      dbg('Fetching next page...');
-      const batch = [];
-      let u = nextUrl;
-      for (let i=0; i<4 && u; i++) {
-        batch.push(gGet(u));
-        // We don't know next nextLink yet — fetch sequentially within batch
-        break; // can't parallelise without knowing URLs upfront
-      }
-      const results = await Promise.all(batch);
-      for (const d of results) {
-        allTickets = [...allTickets, ...(d.value||[])];
-        nextUrl = d['@odata.nextLink']
-          ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
-      }
-      allTickets.sort((a,b)=>Number(b.id)-Number(a.id));
-      buildFilterOptions(allTickets);
-      if (!filterActive()) {
-        renderTickets(allTickets.slice(0, displayedCount));
-      }
-      $id('tkt-count').textContent = allTickets.length + (nextUrl?'+ …':'') + ' Tickets';
-    }
-
-    allTicketsComplete = true;
-    renderLoadMore();
-    if (filterActive()) filterTickets();
-
-    // Save to cache
-    try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify(allTickets));
-      localStorage.setItem(CACHE_TS, String(Date.now()));
-    } catch {}
-    console.log('[Tickets] done & cached:', allTickets.length);
-    dbg('=== DONE:', allTickets.length, 'tickets ===');
-
-  } catch(e) {
-    dbg('ERROR:', e.message);
-    dbg('Stack:', e.stack?.split('\n')[1]||'');
-    if (allTickets.length) {
-      renderTickets(allTickets.slice(0, displayedCount));
-    } else {
-      $id('tkt-empty').textContent = '⚠ '+e.message;
-      $id('tkt-empty').style.color = 'var(--red)';
-    }
-  }
-}
-
-async function refreshInBackground(cacheKey, cacheTsKey) {
-  // Silent background refresh — updates cache without changing view
-  try {
-    const neededCols = [
-      getCol('title')||'Title', getCol('status')||'Status',
-      getCol('prio'), getCol('assignee'), getCol('category'),
-      getCol('werk'), getCol('type'), getCol('created'), getCol('email'),
-    ].filter(Boolean).join(',');
-    const sel = neededCols ? `($select=${neededCols})` : '';
-    const cCreatedColBg = getCol('created');
-    const orderFieldBg  = cCreatedColBg || 'createdDateTime';
-    let url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields${sel}&$top=500&$orderby=${orderFieldBg} desc`;
-    let fresh = [];
     while (url) {
       const d = await gGet(url);
-      fresh = [...fresh, ...(d.value||[])];
+      const page = d.value||[];
+      allTickets = [...allTickets, ...page];
       url = d['@odata.nextLink']
         ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
-    }
-    fresh.sort((a,b)=>Number(b.id)-Number(a.id));
-    localStorage.setItem(cacheKey, JSON.stringify(fresh));
-    localStorage.setItem(cacheTsKey, String(Date.now()));
-    // Update view if new tickets arrived
-    if (fresh.length !== allTickets.length) {
-      allTickets = fresh;
-      allTicketsComplete = true;
+      // Sort and show after each batch
+      allTickets.sort((a,b)=>Number(b.id)-Number(a.id));
       buildFilterOptions(allTickets);
       renderTickets(filterActive()?applyFilters(allTickets):allTickets.slice(0,displayedCount));
-      $id('tkt-count').textContent = allTickets.length + ' Tickets';
-      renderLoadMore();
-      toast(`Cache aktualisiert: ${fresh.length} Tickets`, 'success');
+      $id('tkt-count').textContent=allTickets.length+(url?'+ …':'')+' Tickets';
     }
-  } catch(e) { console.warn('[Tickets] bg refresh:', e.message); }
-}
-
     allTicketsComplete=true;
     renderLoadMore();
     if(filterActive()) filterTickets();
-
+    // Data ready — show "own view" button and auto-switch
+    const b1=$id('btn-own-view'); if(b1) b1.style.display='';
+    const b2=$id('btn-own-view2'); if(b2) b2.style.display='';
+    switchToOwnView(); // auto-switch to own view when loaded
+    console.log('[Tickets] done:', allTickets.length);
+  } catch(e) {
+    console.error('[Tickets]',e.message);
+    if(allTickets.length) {
+      renderTickets(allTickets.slice(0,displayedCount));
+      toast('Teilladen: '+e.message,'info');
+    } else {
+      $id('tkt-empty').textContent='⚠ '+e.message;
+      $id('tkt-empty').style.color='var(--red)';
+    }
+  }
+}
 
 
 function applyFilters(list) {
