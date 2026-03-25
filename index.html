@@ -354,34 +354,41 @@ function toast(msg,type='info'){
 let msalApp, account;
 
 async function initAuth() {
+  // Clear stale MSAL state
+  try {
+    Object.keys(sessionStorage)
+      .filter(k=>k.includes('msal')||k.includes('login')||k.includes('interaction'))
+      .forEach(k=>sessionStorage.removeItem(k));
+  } catch {}
+
   const cfg = {
-    auth:{ clientId:CLIENT_ID, authority:`https://login.microsoftonline.com/${TENANT_ID}`,
-           redirectUri: 'https://dfedorov12.github.io/tickets/' },
-    cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:true }
+    auth: {
+      clientId:    CLIENT_ID,
+      authority:  `https://login.microsoftonline.com/${TENANT_ID}`,
+      redirectUri: 'https://dfedorov12.github.io/tickets/'
+    },
+    cache: { cacheLocation:'localStorage', storeAuthStateInCookie:false }
   };
   msalApp = new msal.PublicClientApplication(cfg);
   await msalApp.initialize();
-  await msalApp.handleRedirectPromise();
+  try { await msalApp.handleRedirectPromise(); } catch {}
   const accounts = msalApp.getAllAccounts();
-  if (accounts.length) {
-    account = accounts[0];
-    return true;
-  }
+  if (accounts.length > 0) { account = accounts[0]; return true; }
   return false;
 }
 
 async function doLogin() {
-  $id('boot-btn').style.display='none';
-  $id('boot-sub').textContent='Anmeldung läuft…';
+  $id('boot-btn').style.display = 'none';
+  $id('boot-sub').textContent = 'Popup öffnet sich…';
   try {
-    const r = await msalApp.loginPopup({scopes:SCOPES});
+    const r = await msalApp.loginPopup({ scopes:SCOPES, prompt:'select_account' });
     account = r.account;
     bootDone();
   } catch(e) {
     $id('boot-err').textContent = e.message;
-    $id('boot-err').style.display='block';
-    $id('boot-btn').style.display='block';
-    $id('boot-btn').textContent='Erneut versuchen';
+    $id('boot-err').style.display = 'block';
+    $id('boot-btn').textContent = 'Erneut versuchen';
+    $id('boot-btn').style.display = 'block';
   }
 }
 
