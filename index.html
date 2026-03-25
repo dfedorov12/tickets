@@ -490,6 +490,30 @@ async function streamTickets() {
   $id('tkt-empty').style.display='block';
   $id('tkt-table').style.display='none';
 
+  // ── DEBUG OVERLAY ────────────────────────────────────────────────
+  let dbgEl = $id('stream-dbg');
+  if (!dbgEl) {
+    dbgEl = document.createElement('div');
+    dbgEl.id = 'stream-dbg';
+    dbgEl.style.cssText = 'position:fixed;bottom:10px;right:10px;width:460px;max-height:320px;overflow:auto;background:#0a1f3c;color:#7dd3fc;font-size:11px;font-family:monospace;padding:12px;border-radius:8px;z-index:99999;white-space:pre-wrap;';
+    const cb = document.createElement('button');
+    cb.textContent='✕'; cb.style.cssText='position:sticky;top:0;float:right;background:none;border:none;color:#fff;cursor:pointer;font-size:14px;';
+    cb.onclick=()=>dbgEl.remove(); dbgEl.appendChild(cb);
+    document.body.appendChild(dbgEl);
+  }
+  const dbgLines = [];
+  const dbg = (...a) => {
+    const s = a.join(' ');
+    console.log('[TKT]', s);
+    dbgLines.push(s);
+    dbgEl.childNodes[1] ? dbgEl.childNodes[1].textContent = dbgLines.join('\n')
+      : dbgEl.appendChild(document.createTextNode(dbgLines.join('\n')));
+  };
+  dbg('=== streamTickets START ===');
+  dbg('ticketSiteId:', ticketSiteId||'MISSING');
+  dbg('ticketListId:', ticketListId||'MISSING');
+  // ────────────────────────────────────────────────────────────────
+
   const CACHE_KEY = `tkt_cache_${ticketListId}`;
   const CACHE_TS  = `tkt_cache_ts_${ticketListId}`;
   const CACHE_AGE = 5 * 60 * 1000; // 5 min
@@ -499,6 +523,7 @@ async function streamTickets() {
     const cached = localStorage.getItem(CACHE_KEY);
     const ts     = Number(localStorage.getItem(CACHE_TS)||0);
     if (cached && Date.now()-ts < CACHE_AGE) {
+      dbg('Cache HIT:', JSON.parse(cached).length, 'tickets, age:', Math.round((Date.now()-ts)/1000)+'s');
       allTickets = JSON.parse(cached);
       buildFilterOptions(allTickets);
       renderTickets(allTickets.slice(0, displayedCount));
@@ -524,8 +549,10 @@ async function streamTickets() {
 
   $id('tkt-empty').textContent = 'Lade…';
   try {
+    dbg('base URL:', base);
     // Fetch first page
     const first = await gGet(base);
+    dbg('First page: ', (first.value||[]).length, 'items, nextLink:', first['@odata.nextLink']?'YES':'NO');
     allTickets = first.value||[];
     allTickets.sort((a,b)=>Number(b.id)-Number(a.id));
     buildFilterOptions(allTickets);
@@ -538,7 +565,7 @@ async function streamTickets() {
       ? first['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
 
     while (nextUrl) {
-      // Fetch up to 4 pages in parallel
+      dbg('Fetching next page...');
       const batch = [];
       let u = nextUrl;
       for (let i=0; i<4 && u; i++) {
@@ -570,8 +597,11 @@ async function streamTickets() {
       localStorage.setItem(CACHE_TS, String(Date.now()));
     } catch {}
     console.log('[Tickets] done & cached:', allTickets.length);
+    dbg('=== DONE:', allTickets.length, 'tickets ===');
 
   } catch(e) {
+    dbg('ERROR:', e.message);
+    dbg('Stack:', e.stack?.split('\n')[1]||'');
     if (allTickets.length) {
       renderTickets(allTickets.slice(0, displayedCount));
     } else {
