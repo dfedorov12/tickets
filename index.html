@@ -539,13 +539,7 @@ async function streamTickets() {
   } catch {}
 
   // ── No cache: fetch first page, show immediately ────────────────
-  const neededCols = [
-    getCol('title')||'Title', getCol('status')||'Status',
-    getCol('prio'), getCol('assignee'), getCol('category'),
-    getCol('werk'), getCol('type'), getCol('created'), getCol('email'),
-  ].filter(Boolean).join(',');
-  const sel = neededCols ? `($select=${neededCols})` : '';
-  const base = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields${sel}&$top=500`;
+  const base = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=500`;
 
   $id('tkt-empty').textContent = 'Lade…';
   try {
