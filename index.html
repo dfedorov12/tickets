@@ -3,985 +3,361 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<meta http-equiv="Cache-Control" content="no-cache,no-store,must-revalidate"/>
-<title>DIHAG · Ticketsystem</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<title>DIHAG · Tickets Liste (Debug)</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-<script src="https://alcdn.msauth.net/browser/2.38.2/js/msal-browser.min.js"></script>
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+*{box-sizing:border-box;margin:0;padding:0;}
 :root{
-  --navy:#0a1f3c; --navy2:#16345a; --navy3:#1e4a7a;
-  --red:#c0392b; --red2:#a93226; --red-bg:rgba(192,57,43,.08);
-  --blue:#2563eb; --blue-bg:rgba(37,99,235,.07);
-  --green:#16a34a; --green-bg:rgba(22,163,74,.08);
-  --yellow:#d97706; --yellow-bg:rgba(217,119,6,.09);
-  --orange:#ea580c; --orange-bg:rgba(234,88,12,.09);
-  --surface:#fff; --bg:#f2f4f7; --bg2:#eef0f4;
-  --border:rgba(10,31,60,.1); --border2:rgba(10,31,60,.18);
+  --navy:#0a1f3c; --red:#c0392b; --blue:#2563eb; --green:#16a34a;
+  --yellow:#d97706; --bg:#f2f4f7; --border:rgba(10,31,60,.1);
   --text:#1a2942; --text-dim:#6b7a8f; --text-muted:#9ba8b8;
-  --r-sm:6px; --r:10px; --r-lg:14px;
-  --shadow:0 2px 12px rgba(10,31,60,.09); --shadow-sm:0 1px 6px rgba(10,31,60,.06);
 }
-html,body{height:100%;font-family:Inter,sans-serif;background:var(--bg);color:var(--text);}
-
-/* BOOT */
-#boot{position:fixed;inset:0;background:var(--navy);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;gap:18px;}
-.boot-logo{width:120px;height:auto;filter:brightness(10) saturate(0);}
-.boot-title{color:#fff;font-size:22px;font-weight:700;}
-.boot-sub{color:rgba(255,255,255,.5);font-size:13px;}
-.boot-spinner{width:28px;height:28px;border:3px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;}
-.boot-err{color:#f87171;font-size:12px;max-width:400px;text-align:center;line-height:1.6;background:rgba(255,255,255,.07);padding:12px 18px;border-radius:8px;}
-.boot-btn{padding:10px 24px;background:var(--red);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;margin-top:8px;}
-@keyframes spin{to{transform:rotate(360deg)}}
-
-/* LAYOUT */
-#app{display:flex;flex-direction:column;height:100%;}
-
-/* HEADER */
-header{
-  height:48px;background:var(--navy);display:flex;align-items:center;
-  padding:0 16px;gap:12px;flex-shrink:0;position:sticky;top:0;z-index:100;
-}
-.hdr-brand{display:flex;align-items:center;gap:10px;}
-.hdr-brand img{height:28px;filter:brightness(10) saturate(0);}
-.hdr-tag{font-size:11px;font-weight:700;background:rgba(255,255,255,.12);
-  color:rgba(255,255,255,.7);padding:3px 9px;border-radius:4px;letter-spacing:.04em;}
-.hdr-divider{width:1px;height:24px;background:rgba(255,255,255,.12);}
-.hdr-nav{display:flex;gap:2px;}
-.hdr-tab{background:none;border:none;color:rgba(255,255,255,.5);padding:6px 14px;
-  border-radius:6px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;}
-.hdr-tab:hover{background:rgba(255,255,255,.1);color:#fff;}
-.hdr-tab.on{background:rgba(255,255,255,.15);color:#fff;}
-.hdr-right{display:flex;align-items:center;gap:8px;margin-left:auto;}
-.hdr-btn{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);
-  color:rgba(255,255,255,.85);padding:5px 12px;border-radius:6px;
-  font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;}
-.hdr-btn:hover{background:rgba(255,255,255,.2);color:#fff;}
-.hdr-btn:disabled{opacity:.4;pointer-events:none;}
-.hdr-btn.primary{background:var(--red);border-color:var(--red);color:#fff;}
-.hdr-btn.primary:hover{background:var(--red2);}
-.hdr-av{width:30px;height:30px;border-radius:50%;background:var(--red);
-  color:#fff;display:flex;align-items:center;justify-content:center;
-  font-size:12px;font-weight:700;}
-
-/* CONTENT */
-#content{flex:1;overflow:hidden;display:flex;flex-direction:column;}
-.panel{display:none;flex:1;overflow:hidden;flex-direction:column;}
-.panel.active{display:flex;}
-
-/* TICKETS TABLE PANEL */
-.tkt-toolbar{padding:12px 20px;border-bottom:1px solid var(--border);
-  display:flex;align-items:center;gap:10px;flex-shrink:0;background:#fff;}
-.tkt-search{flex:1;max-width:300px;padding:7px 12px;border:1.5px solid var(--border2);
-  border-radius:6px;font-family:inherit;font-size:12px;outline:none;}
-.tkt-search:focus{border-color:var(--navy);}
-.tkt-filter-sel{padding:7px 10px;border:1.5px solid var(--border2);border-radius:6px;
-  font-family:inherit;font-size:12px;outline:none;background:#fff;}
-.tkt-table-wrap{flex:1;overflow:auto;}
-.tkt-table{width:100%;border-collapse:collapse;}
-.tkt-table th{padding:9px 14px;text-align:left;font-size:10px;font-weight:700;
-  color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;
-  border-bottom:2px solid var(--border);background:#fafbfc;position:sticky;top:0;z-index:1;}
-.tkt-table td{padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;vertical-align:middle;}
-.tkt-table tr:hover td{background:rgba(10,31,60,.025);}
-.tkt-table tr.clickable{cursor:pointer;}
-.st-badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap;}
-.st-offen{background:var(--blue-bg);color:var(--blue);}
-.st-bearbeitung{background:var(--yellow-bg);color:var(--yellow);}
-.st-erledigt{background:var(--green-bg);color:var(--green);}
-.st-abgebrochen{background:rgba(107,114,128,.1);color:#4b5563;}
+body{font-family:Inter,sans-serif;background:var(--bg);color:var(--text);padding:20px;}
+.container{max-width:1400px;margin:0 auto;background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(10,31,60,.09);}
+header{padding:20px 24px;border-bottom:2px solid var(--border);background:var(--navy);color:#fff;border-radius:12px 12px 0 0;}
+h1{font-size:24px;margin-bottom:8px;}
+.subtitle{font-size:13px;opacity:.7;}
+.debug-panel{background:#1a1a1a;color:#00ff00;padding:16px;margin:20px 24px;border-radius:8px;font-family:'Courier New',monospace;font-size:11px;line-height:1.6;max-height:400px;overflow:auto;border:2px solid #333;}
+.debug-title{color:#ffff00;font-weight:700;margin-bottom:8px;font-size:13px;}
+.debug-line{margin:2px 0;}
+.debug-step{color:#00ccff;}
+.debug-data{color:#ff9500;margin-left:20px;}
+.toolbar{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;}
+.search-input{flex:1;max-width:400px;padding:10px 14px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:13px;}
+.btn{padding:8px 16px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;border:none;}
+.btn-primary{background:var(--navy);color:#fff;}
+.btn-secondary{background:var(--bg);color:var(--text);border:1.5px solid var(--border);}
+.table-wrap{padding:0 24px 24px;overflow-x:auto;}
+table{width:100%;border-collapse:collapse;margin-top:20px;}
+th{padding:12px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid var(--border);background:#fafbfc;position:sticky;top:0;}
+td{padding:12px 14px;border-bottom:1px solid var(--border);font-size:13px;}
+tr:hover td{background:rgba(10,31,60,.02);}
+.badge{display:inline-flex;padding:4px 10px;border-radius:12px;font-size:10px;font-weight:700;white-space:nowrap;}
+.status-offen{background:rgba(37,99,235,.1);color:var(--blue);}
+.status-bearbeitung{background:rgba(217,119,6,.1);color:var(--yellow);}
+.status-erledigt{background:rgba(22,163,74,.1);color:var(--green);}
+.status-abgebrochen{background:rgba(107,114,128,.1);color:#4b5563;}
 .prio-hoch{color:var(--red);font-weight:700;}
 .prio-kritisch{color:var(--red);font-weight:700;text-decoration:underline;}
-.attach-count{display:inline-flex;align-items:center;gap:4px;font-size:10px;
-  background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:4px;}
-
-/* DETAIL SIDEBAR */
-.tkt-main{display:flex;flex:1;overflow:hidden;}
-.tkt-sidebar{width:440px;flex-shrink:0;border-left:1px solid var(--border);
-  background:#fff;display:flex;flex-direction:column;overflow:hidden;
-  transform:translateX(100%);transition:transform .2s;position:relative;}
-.tkt-sidebar.open{transform:translateX(0);}
-.tkt-sidebar-hdr{padding:14px 18px;border-bottom:1px solid var(--border);
-  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
-.tkt-sidebar-body{flex:1;overflow:auto;padding:18px;}
-.tkt-close{background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-dim);}
-.field-row{margin-bottom:14px;}
-.field-row label{display:block;font-size:10px;font-weight:700;color:var(--text-muted);
-  text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;}
-.field-row input,.field-row textarea,.field-row select{
-  width:100%;padding:8px 11px;border:1.5px solid var(--border2);border-radius:6px;
-  font-family:inherit;font-size:13px;outline:none;background:#fff;transition:border-color .15s;}
-.field-row input:focus,.field-row textarea:focus,.field-row select:focus{border-color:var(--navy);}
-.field-row textarea{resize:vertical;min-height:80px;}
-.sidebar-actions{padding:14px 18px;border-top:1px solid var(--border);flex-shrink:0;display:flex;gap:8px;}
-.btn{padding:8px 18px;border-radius:6px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;border:none;transition:all .15s;}
-.btn-primary{background:var(--navy);color:#fff;}
-.btn-primary:hover{background:var(--navy2);}
-.btn-danger{background:var(--red-bg);color:var(--red);border:1.5px solid var(--red);}
-.btn-ghost{background:none;color:var(--text-dim);border:1.5px solid var(--border);}
-.btn-ghost:hover{border-color:var(--navy);color:var(--navy);}
-.status-changer{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;}
-.status-btn{padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;border:2px solid transparent;transition:all .15s;}
-.status-btn.active{border-color:currentColor;}
-.section-title{font-size:11px;font-weight:700;color:var(--navy);
-  margin:18px 0 10px;padding-bottom:5px;border-bottom:1px solid var(--border);}
-.attach-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;
-  background:var(--bg);border:1px solid var(--border);border-radius:6px;
-  font-size:11px;cursor:pointer;text-decoration:none;color:var(--text);margin:0 4px 4px 0;}
-.attach-pill:hover{background:var(--navy);color:#fff;border-color:var(--navy);}
-
-/* AUTOMATISMEN */
-.auto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;padding:24px;}
-.auto-card{background:#fff;border:1.5px solid var(--border);border-radius:12px;padding:22px;
-  cursor:pointer;transition:all .15s;position:relative;}
-.auto-card:hover{box-shadow:0 4px 20px rgba(10,31,60,.1);border-color:var(--navy);transform:translateY(-2px);}
-.auto-card-icon{font-size:30px;margin-bottom:12px;}
-.auto-card-title{font-size:15px;font-weight:700;color:var(--navy);margin-bottom:5px;}
-.auto-card-desc{font-size:12px;color:var(--text-dim);line-height:1.6;}
-.auto-card-tag{position:absolute;top:14px;right:14px;font-size:9px;font-weight:700;
-  padding:2px 8px;background:var(--red-bg);color:var(--red);border-radius:10px;text-transform:uppercase;}
-
-/* MODAL */
-.modal-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);
-  z-index:500;align-items:center;justify-content:center;}
-.modal-ov.open{display:flex;}
-.modal{background:#fff;border-radius:14px;width:620px;max-height:90vh;
-  overflow:auto;padding:28px;box-shadow:0 12px 48px rgba(0,0,0,.2);}
-.modal-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;}
-.modal-title{font-size:17px;font-weight:700;color:var(--navy);}
-.modal-close{background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-dim);}
-.modal-footer{display:flex;gap:10px;justify-content:flex-end;margin-top:22px;
-  padding-top:16px;border-top:1px solid var(--border);}
-.form-section{font-size:11px;font-weight:700;color:var(--navy);
-  margin:16px 0 10px;padding-bottom:5px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.06em;}
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-.form-field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px;}
-.form-field.full{grid-column:1/-1;}
-.form-field label{font-size:11px;font-weight:600;color:var(--navy);}
-.form-field label .req{color:var(--red);}
-.form-field input,.form-field textarea,.form-field select{
-  padding:8px 12px;border:1.5px solid var(--border2);border-radius:6px;
-  font-family:inherit;font-size:13px;outline:none;transition:border-color .15s;}
-.form-field input:focus,.form-field textarea:focus,.form-field select:focus{border-color:var(--red);}
-.form-field textarea{resize:vertical;min-height:88px;}
-.checkbox-row{display:flex;align-items:center;gap:10px;padding:8px 0;}
-.checkbox-row input[type=checkbox]{width:16px;height:16px;cursor:pointer;}
-.checkbox-row label{font-size:13px;cursor:pointer;}
-
-/* SPINNER */
-.spinner{width:32px;height:32px;border:3px solid var(--border);
-  border-top-color:var(--navy);border-radius:50%;animation:spin .8s linear infinite;margin:auto;}
-.empty{text-align:center;padding:48px;color:var(--text-dim);font-size:13px;}
-
-/* TOAST */
-#toast-c{position:fixed;bottom:20px;right:20px;z-index:9000;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
-.toast{display:flex;align-items:center;gap:10px;padding:10px 16px;
-  background:var(--navy);color:#fff;border-radius:8px;font-size:12px;
-  box-shadow:0 4px 16px rgba(0,0,0,.2);pointer-events:all;
-  animation:fadeIn .18s ease;max-width:380px;}
-.toast.success{background:var(--green);}
-.toast.error{background:var(--red);}
-.toast.out{animation:fadeOut .22s ease forwards;}
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-@keyframes fadeOut{to{opacity:0;transform:translateY(8px)}}
+.stats{padding:16px 24px;border-top:2px solid var(--border);display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;}
+.stat-card{padding:14px;background:var(--bg);border-radius:8px;border-left:4px solid var(--blue);}
+.stat-label{font-size:11px;color:var(--text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.05em;}
+.stat-value{font-size:24px;font-weight:700;color:var(--navy);margin-top:4px;}
 </style>
 </head>
 <body>
 
-<!-- BOOT SCREEN -->
-<div id="boot">
-  <div class="boot-spinner" id="boot-spinner"></div>
-  <div class="boot-title">DIHAG Ticketsystem</div>
-  <div class="boot-sub" id="boot-sub">Anmeldung läuft…</div>
-  <div class="boot-err" id="boot-err" style="display:none;"></div>
-  <button class="boot-btn" id="boot-btn" style="display:none;" onclick="doLogin()">Anmelden</button>
-</div>
-
-<!-- APP -->
-<div id="app" style="display:none;">
+<div class="container">
   <header>
-    <div class="hdr-brand">
-      <img src="data:image/png;base64,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" alt="DIHAG"/>
-      <div class="hdr-tag">Tickets</div>
-    </div>
-    <div class="hdr-divider"></div>
-    <nav class="hdr-nav">
-      <button class="hdr-tab on" id="tab-tickets" onclick="showPanel('tickets')">🎫 Tickets</button>
-      <button class="hdr-tab"    id="tab-auto"    onclick="showPanel('auto')">⚡ Automatismen</button>
-    </nav>
-    <div class="hdr-right">
-      <button class="hdr-btn primary" id="btn-new" onclick="openNewTicket()">＋ Neues Ticket</button>
-      <button class="hdr-btn" id="btn-refresh" onclick="streamTickets()">🔄</button>
-      <div class="hdr-divider"></div>
-      <div class="hdr-av" id="hdr-av">?</div>
-    </div>
+    <h1>🎫 DIHAG Tickets Liste</h1>
+    <p class="subtitle">Sortiert nach Erstelldatum (neueste zuerst) • Mit Debug-Ausgabe</p>
   </header>
 
-  <div id="content">
-    <!-- TICKETS PANEL -->
-    <div class="panel active" id="panel-tickets">
-      <div class="tkt-toolbar">
-        <input class="tkt-search" id="tkt-search" placeholder="# ID oder Titel suchen…" oninput="filterTickets()" style="flex:1;max-width:340px;"/>
-        <select class="tkt-filter-sel" id="tkt-st" onchange="filterTickets()">
-          <option value="">Alle Status</option>
-          <option>Offen</option><option>Neu</option>
-          <option>In Bearbeitung</option>
-          <option>Erledigt</option><option>Abgebrochen</option>
-        </select>
-        <select class="tkt-filter-sel" id="tkt-prio" onchange="filterTickets()">
-          <option value="">Alle Prioritäten</option>
-          <option>Niedrig</option><option>Normal</option><option>Mittel</option><option>Hoch</option><option>high</option><option>Kritisch</option>
-        </select>
-        <select class="tkt-filter-sel" id="tkt-kat" onchange="filterTickets()"><option value="">Alle Kategorien</option></select>
-        <select class="tkt-filter-sel" id="tkt-werk" onchange="filterTickets()"><option value="">Alle Werke</option></select>
-        <select class="tkt-filter-sel" id="tkt-art" onchange="filterTickets()"><option value="">Alle Arten</option></select>
-        <span id="tkt-count" style="font-size:11px;color:var(--text-muted);margin-left:4px;white-space:nowrap;"></span>
-        <div style="margin-left:auto;display:flex;gap:6px;">
-          <button onclick="switchToIframe()" style="font-size:11px;padding:4px 10px;background:none;border:1.5px solid var(--border2);border-radius:5px;cursor:pointer;">🔗 SP-Ansicht</button>
-          <button onclick="switchToOwnView()" id="btn-own-view2" style="font-size:11px;padding:4px 10px;background:var(--navy);color:#fff;border:none;border-radius:5px;cursor:pointer;display:none;">📋 Eigene Ansicht</button>
-        </div>
-      </div>
-      <div class="tkt-main">
-        <!-- iFrame: shown immediately while own view loads -->
-        <div id="tkt-iframe-wrap" style="flex:1;overflow:hidden;border-right:1px solid var(--border);display:flex;flex-direction:column;">
-          <div style="padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
-            <span style="font-size:10px;color:var(--text-muted);font-weight:600;">📋 SharePoint-Ansicht</span>
-            <button onclick="switchToOwnView()" id="btn-own-view" style="font-size:10px;padding:3px 10px;background:var(--navy);color:#fff;border:none;border-radius:4px;cursor:pointer;display:none;">✓ Eigene Ansicht</button>
-          </div>
-          <iframe id="tkt-iframe" src="https://dihag.sharepoint.com/sites/ticket/Lists/Tickets/AllItems.aspx?viewid=cec60f58-4cf4-41be-bef9-39f56491b5bb" style="flex:1;border:none;width:100%;" sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe>
-        </div>
-        <!-- Own view: shown when data loaded -->
-        <div style="flex:1;overflow:auto;display:none;" id="tkt-table-wrap">
-          <div class="empty" id="tkt-empty">Lade Tickets…</div>
-          <table class="tkt-table" id="tkt-table" style="display:none;">
-            <thead>
-              <tr>
-                <th>#</th><th>Titel</th><th>Zugewiesen</th><th>Prio</th>
-                <th>Status</th><th>Erstellt am</th><th>Kategorie</th>
-                <th>Werk</th><th>Art</th><th>📎</th>
-              </tr>
-            </thead>
-            <tbody id="tkt-tbody"></tbody>
-          </table>
-        </div>
-        <!-- DETAIL SIDEBAR -->
-        <div class="tkt-sidebar" id="tkt-sidebar">
-          <div class="tkt-sidebar-hdr">
-            <div style="font-size:14px;font-weight:700;color:var(--navy);" id="sb-title">Ticket</div>
-            <button class="tkt-close" onclick="closeSidebar()">✕</button>
-          </div>
-          <div class="tkt-sidebar-body" id="sb-body"></div>
-          <div class="sidebar-actions" id="sb-actions"></div>
-        </div>
-      </div>
-    </div>
+  <div class="debug-panel" id="debugPanel">
+    <div class="debug-title">🐛 DEBUG LOG</div>
+    <div id="debugOutput"></div>
+  </div>
 
-    <!-- AUTOMATISMEN PANEL -->
-    <div class="panel" id="panel-auto">
-      <div style="padding:20px 24px 12px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;">
-        <div style="font-size:17px;font-weight:700;color:var(--navy);">⚡ Automatismen</div>
-        <div style="font-size:12px;color:var(--text-dim);margin-top:3px;">Formulare & automatisierte Prozesse</div>
-      </div>
-      <div class="auto-grid" id="auto-grid"></div>
+  <div class="toolbar">
+    <input type="text" class="search-input" id="searchInput" placeholder="🔍 Tickets durchsuchen...">
+    <button class="btn btn-primary" onclick="sortTickets('erstellt_am', 'desc')">↓ Neueste zuerst</button>
+    <button class="btn btn-secondary" onclick="sortTickets('erstellt_am', 'asc')">↑ Älteste zuerst</button>
+    <button class="btn btn-secondary" onclick="clearDebug()">🧹 Debug leeren</button>
+  </div>
+
+  <div class="table-wrap">
+    <table id="ticketsTable">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Titel</th>
+          <th>Status</th>
+          <th>Priorität</th>
+          <th>Ersteller</th>
+          <th>Erstellt am</th>
+          <th>Bearbeiter</th>
+        </tr>
+      </thead>
+      <tbody id="ticketsBody">
+      </tbody>
+    </table>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Gesamt</div>
+      <div class="stat-value" id="statTotal">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Offen</div>
+      <div class="stat-value" id="statOffen">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">In Bearbeitung</div>
+      <div class="stat-value" id="statBearbeitung">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Erledigt</div>
+      <div class="stat-value" id="statErledigt">0</div>
     </div>
   </div>
 </div>
-
-<!-- NEW/EDIT TICKET MODAL -->
-<div class="modal-ov" id="ticket-modal">
-  <div class="modal" style="width:680px;">
-    <div class="modal-hdr">
-      <div class="modal-title" id="tm-title">Neues Ticket</div>
-      <button class="modal-close" onclick="closeTicketModal()">✕</button>
-    </div>
-    <div id="tm-body"></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeTicketModal()">Abbrechen</button>
-      <button class="btn btn-primary" onclick="saveTicket()">Speichern</button>
-    </div>
-  </div>
-</div>
-
-<!-- AUTOMATISMEN FORM MODAL -->
-<div class="modal-ov" id="auto-modal">
-  <div class="modal">
-    <div class="modal-hdr">
-      <div class="modal-title" id="am-title">Formular</div>
-      <button class="modal-close" onclick="closeAutoModal()">✕</button>
-    </div>
-    <div id="am-body"></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeAutoModal()">Abbrechen</button>
-      <button class="btn btn-primary" id="am-submit" onclick="submitAutoForm()">Absenden</button>
-    </div>
-  </div>
-</div>
-
-<div id="toast-c"></div>
 
 <script>
 // ════════════════════════════════════════════════════════════════
-// CONFIG
+// DEBUG HELPER
 // ════════════════════════════════════════════════════════════════
-const CLIENT_ID   = '75e627e8-2de0-4ec6-bec9-311757b89e08';
-const TENANT_ID   = 'fdb70646-023a-403b-a4b9-1f474a935123';
-const SCOPES      = ['User.Read','Sites.Read.All','Sites.ReadWrite.All','Files.ReadWrite.All'];
-const TICKET_SITE = 'dihag.sharepoint.com:/sites/ticket';
+function debugLog(message, type = 'info') {
+  const output = document.getElementById('debugOutput');
+  const timestamp = new Date().toLocaleTimeString('de-DE');
+  let className = 'debug-line';
+  let prefix = '•';
+  
+  if (type === 'step') {
+    className = 'debug-step';
+    prefix = '▶';
+  } else if (type === 'data') {
+    className = 'debug-data';
+    prefix = '  →';
+  }
+  
+  const line = document.createElement('div');
+  line.className = className;
+  line.textContent = `[${timestamp}] ${prefix} ${message}`;
+  output.appendChild(line);
+  output.scrollTop = output.scrollHeight;
+}
+
+function clearDebug() {
+  document.getElementById('debugOutput').innerHTML = '';
+  debugLog('Debug-Log geleert', 'info');
+}
 
 // ════════════════════════════════════════════════════════════════
-// HELPERS
+// TICKET DATA (Beispieldaten - können durch echte Daten ersetzt werden)
 // ════════════════════════════════════════════════════════════════
-const $id = id => document.getElementById(id);
-const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-const fieldStr = v => {
-  if (!v) return '';
-  if (typeof v === 'string') {
-    // Parse JSON arrays that SP sometimes returns as strings
-    if (v.startsWith('[')) {
-      try {
-        const arr = JSON.parse(v);
-        return arr.map(x=>x.LookupValue||x.displayName||x.Title||x.Email||'').filter(Boolean).join(', ');
-      } catch {}
+let tickets = [
+  {
+    id: 'TKT-001',
+    titel: 'Neuer Laptop für Marketing-Team benötigt',
+    status: 'Offen',
+    prioritaet: 'Hoch',
+    ersteller: 'M. Schmidt',
+    erstellt_am: '2024-03-20T09:15:00',
+    bearbeiter: '-'
+  },
+  {
+    id: 'TKT-002',
+    titel: 'E-Mail Probleme bei Outlook Synchronisation',
+    status: 'In Bearbeitung',
+    prioritaet: 'Kritisch',
+    ersteller: 'A. Müller',
+    erstellt_am: '2024-03-25T14:30:00',
+    bearbeiter: 'IT-Team'
+  },
+  {
+    id: 'TKT-003',
+    titel: 'Drucker im 2. OG funktioniert nicht',
+    status: 'Erledigt',
+    prioritaet: 'Mittel',
+    ersteller: 'S. Weber',
+    erstellt_am: '2024-03-18T11:45:00',
+    bearbeiter: 'H. Fischer'
+  },
+  {
+    id: 'TKT-004',
+    titel: 'VPN Zugang für Homeoffice einrichten',
+    status: 'Offen',
+    prioritaet: 'Hoch',
+    ersteller: 'L. Bauer',
+    erstellt_am: '2024-03-26T08:00:00',
+    bearbeiter: '-'
+  },
+  {
+    id: 'TKT-005',
+    titel: 'Software-Update für Buchhaltungssystem',
+    status: 'In Bearbeitung',
+    prioritaet: 'Mittel',
+    ersteller: 'R. Klein',
+    erstellt_am: '2024-03-22T16:20:00',
+    bearbeiter: 'IT-Team'
+  },
+  {
+    id: 'TKT-006',
+    titel: 'Netzwerk-Störung im Erdgeschoss',
+    status: 'Erledigt',
+    prioritaet: 'Kritisch',
+    ersteller: 'J. Hoffmann',
+    erstellt_am: '2024-03-19T10:30:00',
+    bearbeiter: 'M. Wagner'
+  },
+  {
+    id: 'TKT-007',
+    titel: 'Neue Benutzerkonten für Praktikanten',
+    status: 'Offen',
+    prioritaet: 'Niedrig',
+    ersteller: 'P. Meyer',
+    erstellt_am: '2024-03-24T13:15:00',
+    bearbeiter: '-'
+  },
+  {
+    id: 'TKT-008',
+    titel: 'Datensicherung läuft nicht automatisch',
+    status: 'In Bearbeitung',
+    prioritaet: 'Hoch',
+    ersteller: 'T. Schulz',
+    erstellt_am: '2024-03-23T15:45:00',
+    bearbeiter: 'IT-Team'
+  }
+];
+
+// ════════════════════════════════════════════════════════════════
+// TICKET PROCESSING
+// ════════════════════════════════════════════════════════════════
+let currentSort = { field: 'erstellt_am', direction: 'desc' };
+let filteredTickets = [...tickets];
+
+function sortTickets(field, direction) {
+  debugLog(`SORTIERUNG GESTARTET`, 'step');
+  debugLog(`Feld: ${field} | Richtung: ${direction}`, 'data');
+  
+  currentSort = { field, direction };
+  
+  debugLog(`Anzahl Tickets vor Sortierung: ${filteredTickets.length}`, 'data');
+  
+  filteredTickets.sort((a, b) => {
+    let valA = a[field];
+    let valB = b[field];
+    
+    // Datum-Vergleich
+    if (field === 'erstellt_am') {
+      valA = new Date(valA).getTime();
+      valB = new Date(valB).getTime();
+      debugLog(`Vergleiche: ${a.id} (${new Date(a[field]).toLocaleString('de-DE')}) mit ${b.id} (${new Date(b[field]).toLocaleString('de-DE')})`, 'data');
     }
-    return v;
-  }
-  if (Array.isArray(v)) return v.map(x=>x.LookupValue||x.displayName||x.Title||x.Email||String(x)).filter(Boolean).join(', ');
-  if (typeof v === 'object') return v.LookupValue||v.displayName||v.Title||v.Email||'';
-  return String(v);
-};
-const fmt = s => s ? new Date(s).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit'}) : '';
-const fmtFull = s => s ? new Date(s).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
-
-function toast(msg,type='info'){
-  const ic={success:'✅',error:'❌',info:'ℹ️'};
-  const t=document.createElement('div'); t.className='toast '+(type||'');
-  t.innerHTML=`<span>${ic[type]||'ℹ️'}</span><span>${esc(msg)}</span>`;
-  $id('toast-c').appendChild(t);
-  setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),260);},4000);
-}
-
-// ════════════════════════════════════════════════════════════════
-// AUTH
-// ════════════════════════════════════════════════════════════════
-let msalApp, account;
-
-async function initAuth() {
-  const cfg = {
-    auth:{ clientId:CLIENT_ID, authority:`https://login.microsoftonline.com/${TENANT_ID}`,
-           redirectUri: 'https://dfedorov12.github.io/tickets/' },
-    cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:true }
-  };
-  msalApp = new msal.PublicClientApplication(cfg);
-  await msalApp.initialize();
-  await msalApp.handleRedirectPromise();
-  const accounts = msalApp.getAllAccounts();
-  if (accounts.length) {
-    account = accounts[0];
-    return true;
-  }
-  return false;
-}
-
-async function doLogin() {
-  $id('boot-btn').style.display='none';
-  $id('boot-sub').textContent='Anmeldung läuft…';
-  try {
-    const r = await msalApp.loginPopup({scopes:SCOPES});
-    account = r.account;
-    bootDone();
-  } catch(e) {
-    $id('boot-err').textContent = e.message;
-    $id('boot-err').style.display='block';
-    $id('boot-btn').style.display='block';
-    $id('boot-btn').textContent='Erneut versuchen';
-  }
-}
-
-function bootDone() {
-  $id('boot').style.display='none';
-  $id('app').style.display='flex';
-  $id('hdr-av').textContent = (account?.name||'?').split(' ').map(n=>n[0]||'').join('').substring(0,2).toUpperCase();
-  initTickets();
-  buildAutoGrid();
-}
-
-async function getToken() {
-  if (!account) throw new Error('Nicht angemeldet');
-  try { return (await msalApp.acquireTokenSilent({scopes:SCOPES,account})).accessToken; }
-  catch { return (await msalApp.acquireTokenPopup({scopes:SCOPES,account})).accessToken; }
-}
-
-async function getSpToken() {
-  const origin = 'https://dihag.sharepoint.com';
-  try { return (await msalApp.acquireTokenSilent({scopes:[`${origin}/Sites.ReadWrite.All`],account})).accessToken; }
-  catch { return (await msalApp.acquireTokenPopup({scopes:[`${origin}/Sites.ReadWrite.All`],account})).accessToken; }
-}
-
-// ════════════════════════════════════════════════════════════════
-// GRAPH API
-// ════════════════════════════════════════════════════════════════
-const API = 'https://graph.microsoft.com/v1.0';
-
-async function gGet(path, headers={}) {
-  const tok = await getToken();
-  const r = await fetch(API+path, {headers:{Authorization:'Bearer '+tok,...headers}});
-  if (!r.ok) throw new Error(`Graph ${r.status}: ${await r.text().catch(()=>'')}`);
-  return r.json();
-}
-async function gPost(path, body) {
-  const tok = await getToken();
-  const r = await fetch(API+path, {method:'POST',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if (!r.ok) throw new Error(`Graph POST ${r.status}: ${await r.text().catch(()=>'')}`);
-  return r.json();
-}
-async function gPatch(path, body) {
-  const tok = await getToken();
-  const r = await fetch(API+path, {method:'PATCH',headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if (r.status===204) return {};
-  if (!r.ok) throw new Error(`Graph PATCH ${r.status}: ${await r.text().catch(()=>'')}`);
-  return r.json().catch(()=>({}));
-}
-
-// ════════════════════════════════════════════════════════════════
-// PANEL SWITCHING
-// ════════════════════════════════════════════════════════════════
-function switchToOwnView() {
-  $id('tkt-iframe-wrap').style.display = 'none';
-  $id('tkt-table-wrap').style.display  = 'flex';
-  $id('tkt-table-wrap').style.flex     = '1';
-}
-
-function switchToIframe() {
-  $id('tkt-iframe-wrap').style.display = 'flex';
-  $id('tkt-iframe-wrap').style.flex    = '1';
-  $id('tkt-table-wrap').style.display  = 'none';
-}
-
-function showPanel(id) {
-  ['tickets','auto'].forEach(p => {
-    $id('panel-'+p).classList.toggle('active', p===id);
-    $id('tab-'+p).classList.toggle('on', p===id);
+    
+    let result = 0;
+    if (valA < valB) result = -1;
+    if (valA > valB) result = 1;
+    
+    return direction === 'desc' ? -result : result;
   });
-  $id('btn-new').style.display = id==='tickets' ? '' : 'none';
-  $id('btn-refresh').style.display = id==='tickets' ? '' : 'none';
+  
+  debugLog(`Sortierung abgeschlossen`, 'step');
+  debugLog(`Erstes Ticket: ${filteredTickets[0].id} (${new Date(filteredTickets[0].erstellt_am).toLocaleString('de-DE')})`, 'data');
+  debugLog(`Letztes Ticket: ${filteredTickets[filteredTickets.length-1].id} (${new Date(filteredTickets[filteredTickets.length-1].erstellt_am).toLocaleString('de-DE')})`, 'data');
+  
+  renderTickets();
 }
 
-// ════════════════════════════════════════════════════════════════
-// TICKET SYSTEM
-// ════════════════════════════════════════════════════════════════
-let ticketSiteId = null;
-let ticketListId = null;
-let ticketCols   = {};   // internal → display
-let allTickets   = [];
-let editingId    = null;
-let allNextLink  = null;
-let allTicketsComplete = false;
-let allPrevSkip = 0;
-let totalTicketCount = 0;
-let allOlderNextUrl = null;
-
-async function initTickets() {
-  try {
-    $id('tkt-empty').style.display='block';
-    $id('tkt-empty').textContent='Verbinde…';
-    const site = await gGet(`/sites/${TICKET_SITE}`);
-    ticketSiteId = site.id;
-    const lists = await gGet(`/sites/${ticketSiteId}/lists?$select=id,name,displayName&$top=100`);
-    const lst = (lists.value||[]).find(l=>l.displayName==='Tickets'||l.name==='Tickets')
-             || (lists.value||[]).find(l=>l.name.toLowerCase().includes('ticket')||l.displayName.toLowerCase().includes('ticket'));
-    if (!lst) throw new Error('Liste nicht gefunden: '+(lists.value||[]).map(l=>l.displayName).join(', '));
-    ticketListId = lst.id;
-    const cols = await gGet(`/sites/${ticketSiteId}/lists/${ticketListId}/columns?$top=200`);
-    (cols.value||[]).forEach(c=>{ if(!c.readOnly) ticketCols[c.name]=c.displayName; });
-    streamTickets();
-  } catch(e) {
-    $id('tkt-empty').textContent='⚠ '+e.message;
-    $id('tkt-empty').style.color='var(--red)';
-  }
-}
-
-async function streamTickets() {
-  allTickets=[]; allTicketsComplete=false; allOlderNextUrl=null; displayedCount=100;
-  $id('tkt-empty').style.display='block';
-  $id('tkt-empty').textContent='Lade Tickets…';
-  $id('tkt-table').style.display='none';
-  let url=`/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100`;
-  try {
-    while (url) {
-      const d = await gGet(url);
-      const page = d.value||[];
-      allTickets = [...allTickets, ...page];
-      url = d['@odata.nextLink']
-        ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
-      // Sort and show after each batch
-      allTickets.sort((a,b)=>Number(b.id)-Number(a.id));
-      buildFilterOptions(allTickets);
-      renderTickets(filterActive()?applyFilters(allTickets):allTickets.slice(0,displayedCount));
-      $id('tkt-count').textContent=allTickets.length+(url?'+ …':'')+' Tickets';
-    }
-    allTicketsComplete=true;
-    renderLoadMore();
-    if(filterActive()) filterTickets();
-    // Data ready — show "own view" button and auto-switch
-    const b1=$id('btn-own-view'); if(b1) b1.style.display='';
-    const b2=$id('btn-own-view2'); if(b2) b2.style.display='';
-    switchToOwnView(); // auto-switch to own view when loaded
-    console.log('[Tickets] done:', allTickets.length);
-  } catch(e) {
-    console.error('[Tickets]',e.message);
-    if(allTickets.length) {
-      renderTickets(allTickets.slice(0,displayedCount));
-      toast('Teilladen: '+e.message,'info');
-    } else {
-      $id('tkt-empty').textContent='⚠ '+e.message;
-      $id('tkt-empty').style.color='var(--red)';
-    }
-  }
-}
-
-
-function applyFilters(list) {
-  const raw  = ($id('tkt-search').value||'').trim();
-  const q    = raw.toLowerCase();
-  const st   = $id('tkt-st').value;
-  const pr   = $id('tkt-prio').value;
-  const kat  = $id('tkt-kat')?.value||'';
-  const wrk  = $id('tkt-werk')?.value||'';
-  const art  = $id('tkt-art')?.value||'';
-  const cStatus=getCol('status')||'Status';
-  const cPrio  =getCol('prio');
-  const cKat   =getCol('category');
-  const cWerk  =getCol('werk');
-  const cType  =getCol('type');
-  const cTitle =getCol('title')||'Title';
-  return list.filter(it=>{
-    const f=it.fields||{};
-    const idStr=String(it.id);
-    const titleStr=(f[cTitle]||f.Title||'').toLowerCase();
-    const searchOk=!q||(q.replace(/^#/,'')===idStr)||(idStr.includes(q.replace(/^#/,'')))||titleStr.includes(q);
-    return searchOk
-      &&(!st||(f[cStatus]||'').includes(st))
-      &&(!pr||!cPrio||(f[cPrio]||'').includes(pr))
-      &&(!kat||!cKat||(f[cKat]||'')===kat)
-      &&(!wrk||!cWerk||(f[cWerk]||'')===wrk)
-      &&(!art||!cType||(f[cType]||'')===art);
-  });
-}
-
-function buildFilterOptions(tickets) {
-  const cKat  = getCol('category');
-  const cWerk = getCol('werk');
-  const cType = getCol('type');
-  const sets  = {kat:new Set(), werk:new Set(), art:new Set()};
-  tickets.forEach(it=>{
-    const f=it.fields||{};
-    if(cKat  && f[cKat])  sets.kat.add(String(f[cKat]));
-    if(cWerk && f[cWerk]) sets.werk.add(String(f[cWerk]));
-    if(cType && f[cType]) sets.art.add(String(f[cType]));
-  });
-  const fill=(id,set)=>{
-    const sel=$id(id); if(!sel) return;
-    const cur=sel.value;
-    sel.innerHTML='<option value="">'+sel.options[0].text+'</option>';
-    [...set].sort().forEach(v=>{ const o=document.createElement('option'); o.value=o.textContent=v; sel.appendChild(o); });
-    sel.value=cur;
-  };
-  fill('tkt-kat',sets.kat); fill('tkt-werk',sets.werk); fill('tkt-art',sets.art);
-}
-
-function filterTickets() {
-  displayedCount = 100;
-  if (filterActive()) {
-    const filtered = applyFilters(allTickets);
-    renderTickets(filtered);
-    renderLoadMore();
+function filterTickets(searchTerm) {
+  debugLog(`FILTERUNG GESTARTET`, 'step');
+  debugLog(`Suchbegriff: "${searchTerm}"`, 'data');
+  
+  if (!searchTerm.trim()) {
+    filteredTickets = [...tickets];
+    debugLog(`Kein Suchbegriff - zeige alle ${tickets.length} Tickets`, 'data');
   } else {
-    renderTickets(allTickets.slice(0, displayedCount));
-    renderLoadMore();
-  }
-}
-
-function openTicketDetail(id) {
-  const it = allTickets.find(t=>t.id==id);
-  if (!it) return;
-  editingId = id;
-  const f = it.fields||{};
-  const sidebar = $id('tkt-sidebar');
-  $id('sb-title').textContent = `Ticket #${id}`;
-
-  // Status quick-change
-  const colStatus = col(['Status'])||'Status';
-  const curStatus = f[colStatus]||f.Status||'Offen';
-  const statuses  = ['Offen','In Bearbeitung','Erledigt','Abgebrochen'];
-  const stColors  = {Offen:'var(--blue)',  'In Bearbeitung':'var(--yellow)',  Erledigt:'var(--green)',  Abgebrochen:'#6b7280'};
-
-  let html = `<div class="section-title">Status</div>
-    <div class="status-changer">
-      ${statuses.map(s=>`<button class="status-btn${s===curStatus?' active':''}"
-        style="color:${stColors[s]||'#666'};background:${s===curStatus?stColors[s]+'22':'var(--bg)'};"
-        onclick="changeStatus('${id}','${s}')">${s}</button>`).join('')}
-    </div>`;
-
-  // All editable fields
-  html += `<div class="section-title" style="margin-top:18px;">Details</div>`;
-  const skip = new Set(['_UIVersionString','ContentType','Attachments','Modified','Created','Author','Editor','ID']);
-  Object.entries(f).forEach(([k,v])=>{
-    if(skip.has(k)||k.startsWith('_')) return;
-    if(k===colStatus) return; // already shown
-    const label = ticketCols[k]||k;
-    const valStr = typeof v==='object'?(v?.LookupValue||v?.displayName||JSON.stringify(v)):String(v||'');
-    html+=`<div class="field-row"><label>${esc(label)}</label>
-      <input data-fk="${esc(k)}" value="${esc(valStr)}" style="font-size:12px;"/></div>`;
-  });
-
-  // Attachments — fetched via SP REST (Graph doesn't support AttachmentFiles expand)
-  html+=`<div class="section-title">Anhänge</div>
-    <div id="atts-${id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
-      <span style="font-size:11px;color:var(--text-muted);">Lade…</span></div>`;
-  html+=`<div class="section-title">Anhang hochladen</div>
-    <label class="attach-pill" style="cursor:pointer;">
-      ＋ Datei(en) wählen
-      <input type="file" multiple style="display:none;" onchange="uploadAttachments(this.files,'${id}')"/>
-    </label>
-    <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">
-      Erstellt: ${fmtFull(it.createdDateTime)}
-    </div>`;
-
-  $id('sb-body').innerHTML = html;
-  $id('sb-actions').innerHTML = `
-    <button class="btn btn-primary" onclick="saveSidebar('${id}')" style="flex:1;">✓ Speichern</button>
-    <button class="btn btn-ghost"   onclick="closeSidebar()">Schließen</button>
-    <button class="btn btn-danger"  onclick="confirmDeleteTicket('${id}')">🗑</button>`;
-
-  sidebar.classList.add('open');
-  // Fetch attachments async via SP REST
-  fetchTicketAttachments(id);
-}
-
-async function fetchTicketAttachments(id) {
-  const container = document.getElementById('atts-'+id);
-  if (!container) return;
-  try {
-    const spTok = await getSpToken();
-    const r = await fetch(
-      `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/items(${id})/AttachmentFiles`,
-      {headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=verbose'}}
+    const term = searchTerm.toLowerCase();
+    filteredTickets = tickets.filter(t => 
+      t.id.toLowerCase().includes(term) ||
+      t.titel.toLowerCase().includes(term) ||
+      t.status.toLowerCase().includes(term) ||
+      t.ersteller.toLowerCase().includes(term) ||
+      t.bearbeiter.toLowerCase().includes(term)
     );
-    const j = await r.json();
-    const files = j?.d?.results||j?.value||[];
-    // Update count in table row
-    const it = allTickets.find(t=>t.id==id);
-    if (it) it._attachCount = files.length;
+    debugLog(`${filteredTickets.length} Tickets gefunden`, 'data');
+  }
+  
+  sortTickets(currentSort.field, currentSort.direction);
+}
 
-    container.innerHTML = '';
-    if (!files.length) {
-      container.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">Keine Anhänge</span>';
-      return;
-    }
-    files.forEach(a=>{
-      const url = a.ServerRelativeUrl
-        ? 'https://dihag.sharepoint.com'+a.ServerRelativeUrl
-        : (a.AbsoluteUri||'#');
-      const link = document.createElement('a');
-      link.href=url; link.target='_blank'; link.className='attach-pill';
-      link.textContent='📎 '+(a.FileName||'Anhang');
-      container.appendChild(link);
+function renderTickets() {
+  debugLog(`RENDERING GESTARTET`, 'step');
+  debugLog(`Rendere ${filteredTickets.length} Tickets`, 'data');
+  
+  const tbody = document.getElementById('ticketsBody');
+  tbody.innerHTML = '';
+  
+  filteredTickets.forEach((ticket, index) => {
+    const row = document.createElement('tr');
+    
+    const statusClass = `status-${ticket.status.toLowerCase().replace(' ', '')}`;
+    const prioClass = ticket.prioritaet === 'Hoch' ? 'prio-hoch' : ticket.prioritaet === 'Kritisch' ? 'prio-kritisch' : '';
+    
+    const erstelltDatum = new Date(ticket.erstellt_am);
+    const formatiert = erstelltDatum.toLocaleString('de-DE', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
     });
-  } catch(e) {
-    if (container) container.innerHTML='<span style="font-size:11px;color:var(--red);">'+esc(e.message)+'</span>';
-  }
-}
-
-function closeSidebar() { $id('tkt-sidebar').classList.remove('open'); editingId=null; }
-
-async function changeStatus(id, newStatus) {
-  if (!ticketSiteId||!ticketListId) return;
-  const colStatus=col(['Status'])||'Status';
-  try {
-    await gPatch(`/sites/${ticketSiteId}/lists/${ticketListId}/items/${id}/fields`, {[colStatus]:newStatus});
-    const it = allTickets.find(t=>t.id==id);
-    if(it) it.fields[colStatus]=newStatus;
-    toast(`Status → ${newStatus}`,'success');
-    renderTickets(allTickets);
-    openTicketDetail(id); // refresh sidebar
-  } catch(e){ toast('Fehler: '+e.message,'error'); }
-}
-
-async function saveSidebar(id) {
-  const fields={};
-  $id('sb-body').querySelectorAll('[data-fk]').forEach(el=>{ fields[el.dataset.fk]=el.value; });
-  try {
-    await gPatch(`/sites/${ticketSiteId}/lists/${ticketListId}/items/${id}/fields`, fields);
-    // Update local cache
-    const it=allTickets.find(t=>t.id==id);
-    if(it) Object.assign(it.fields, fields);
-    toast('Gespeichert ✓','success');
-    renderTickets(allTickets);
-  } catch(e){ toast('Fehler: '+e.message,'error'); }
-}
-
-async function uploadAttachments(files, id) {
-  if (!files?.length) return;
-  try {
-    const spTok=await getSpToken();
-    const siteBase='https://dihag.sharepoint.com/sites/ticket';
-    for (const f of files) {
-      const buf=await f.arrayBuffer();
-      const r=await fetch(
-        `${siteBase}/_api/web/lists(guid'${ticketListId}')/items(${id})/AttachmentFiles/add(FileName='${encodeURIComponent(f.name)}')`,
-        {method:'POST',headers:{Authorization:'Bearer '+spTok,'Content-Type':'application/octet-stream',Accept:'application/json;odata=verbose'},body:buf}
-      );
-      if(r.ok||r.status===200) toast(`📎 ${f.name} angehängt ✓`,'success');
-      else toast(`Upload Fehler ${r.status}`,'error');
+    
+    row.innerHTML = `
+      <td><strong>${ticket.id}</strong></td>
+      <td>${ticket.titel}</td>
+      <td><span class="badge ${statusClass}">${ticket.status}</span></td>
+      <td><span class="${prioClass}">${ticket.prioritaet}</span></td>
+      <td>${ticket.ersteller}</td>
+      <td>${formatiert}</td>
+      <td>${ticket.bearbeiter}</td>
+    `;
+    
+    tbody.appendChild(row);
+    
+    if (index < 3) {
+      debugLog(`Ticket #${index + 1}: ${ticket.id} | ${formatiert}`, 'data');
     }
-    await loadTickets(true);
-    openTicketDetail(id);
-  } catch(e){ toast('Upload: '+e.message,'error'); }
-}
-
-async function confirmDeleteTicket(id) {
-  if(!confirm(`Ticket #${id} wirklich löschen?`)) return;
-  try {
-    const tok=await getToken();
-    await fetch(`${API}/sites/${ticketSiteId}/lists/${ticketListId}/items/${id}`,
-      {method:'DELETE',headers:{Authorization:'Bearer '+tok}});
-    allTickets=allTickets.filter(t=>t.id!=id);
-    closeSidebar();
-    renderTickets(allTickets);
-    toast('Ticket gelöscht','success');
-  } catch(e){ toast('Löschen: '+e.message,'error'); }
-}
-
-// NEW TICKET MODAL
-function openNewTicket() {
-  editingId=null;
-  $id('tm-title').textContent='Neues Ticket';
-  const colTitle =col(['Titel','Title'])||'Title';
-  const colStatus=col(['Status'])||'Status';
-  const colPrio  =col(['Priorität','Priority']);
-  const colCat   =col(['Kategorie','Typ','Type']);
-  const colDesc  =col(['Beschreibung','Description','Kommentar','Inhalt']);
-
-  let html=`<div class="form-row">
-    <div class="form-field full"><label>Titel <span class="req">*</span></label>
-      <input id="nm-title" data-fk="${colTitle}" placeholder="Kurze Beschreibung des Problems"/></div>`;
-  if(colStatus) html+=`<div class="form-field"><label>Status</label>
-    <select id="nm-status" data-fk="${colStatus}">
-      <option>Offen</option><option>In Bearbeitung</option><option>Erledigt</option><option>Abgebrochen</option>
-    </select></div>`;
-  if(colPrio) html+=`<div class="form-field"><label>Priorität</label>
-    <select data-fk="${colPrio}"><option>Niedrig</option><option>Mittel</option><option selected>Mittel</option><option>Hoch</option><option>Kritisch</option></select></div>`;
-  if(colCat) html+=`<div class="form-field full"><label>Kategorie</label>
-    <input data-fk="${colCat}" placeholder="z.B. Hardware, Software, Zugang…"/></div>`;
-  if(colDesc) html+=`<div class="form-field full"><label>Beschreibung</label>
-    <textarea data-fk="${colDesc}" rows="4" placeholder="Detaillierte Beschreibung…"></textarea></div>`;
-  html+=`</div>`;
-
-  $id('tm-body').innerHTML=html;
-  $id('ticket-modal').classList.add('open');
-}
-
-function closeTicketModal() { $id('ticket-modal').classList.remove('open'); }
-
-async function saveTicket() {
-  if(!ticketSiteId||!ticketListId) return;
-  const fields={};
-  $id('tm-body').querySelectorAll('[data-fk]').forEach(el=>{ if(el.value) fields[el.dataset.fk]=el.value; });
-  const titleCol=col(['Titel','Title'])||'Title';
-  if(!fields[titleCol]){toast('Bitte Titel angeben','error');return;}
-  try {
-    await gPost(`/sites/${ticketSiteId}/lists/${ticketListId}/items`,{fields});
-    toast('Ticket erstellt ✓','success');
-    closeTicketModal();
-    await loadTickets(true);
-  } catch(e){ toast('Fehler: '+e.message,'error'); }
-}
-
-// ════════════════════════════════════════════════════════════════
-// AUTOMATISMEN
-// ════════════════════════════════════════════════════════════════
-const AUTO_FORMS = {
-  offboarding:{
-    title:'🚪 Offboarding',tag:'Mitarbeiter-Austritt',icon:'🚪',
-    desc:'Mitarbeiter-Austritt verwalten, Zugänge sperren, Hardware zurückfordern',
-    sections:[
-      {label:'Mitarbeiterdaten',fields:[
-        {key:'vorname',    label:'Vorname',           type:'text',  required:true},
-        {key:'nachname',   label:'Nachname',          type:'text',  required:true},
-        {key:'email',      label:'E-Mail-Adresse',    type:'email', required:true},
-        {key:'abteilung',  label:'Abteilung',         type:'text'},
-        {key:'vorgesetzter',label:'Vorgesetzter',     type:'text'},
-        {key:'letzter_tag',label:'Letzter Arbeitstag',type:'date',  required:true},
-      ]},
-      {label:'IT-Maßnahmen',fields:[
-        {key:'ad_sperren',    label:'AD-Konto sperren',         type:'checkbox',def:true},
-        {key:'email_weiter',  label:'E-Mail weiterleiten an',   type:'email',  placeholder:'nachfolger@dihag.de'},
-        {key:'vpn_sperren',   label:'VPN-Zugang sperren',       type:'checkbox',def:true},
-        {key:'teams_sperren', label:'Teams-Lizenz entfernen',   type:'checkbox',def:true},
-        {key:'sharepoint',    label:'SharePoint-Zugriff sperren',type:'checkbox',def:true},
-      ]},
-      {label:'Hardware',fields:[
-        {key:'hw_rueckgabe',  label:'Hardware-Rückgabe erforderlich',type:'checkbox',def:true},
-        {key:'hw_liste',      label:'Hardware-Beschreibung',type:'textarea',placeholder:'Laptop (S/N: …), Handy, Badge, Schlüssel…'},
-      ]},
-      {label:'Sonstiges',fields:[
-        {key:'notizen',label:'Notizen / Anmerkungen',type:'textarea'},
-      ]},
-    ],
-    submit:'🚪 Offboarding einleiten',
-    onSubmit: async d=>{
-      const title=`Offboarding: ${d.vorname} ${d.nachname}`;
-      const body=`
-Mitarbeiter: ${d.vorname} ${d.nachname}
-E-Mail: ${d.email}
-Abteilung: ${d.abteilung||'-'}
-Vorgesetzter: ${d.vorgesetzter||'-'}
-Letzter Arbeitstag: ${d.letzter_tag}
-
-IT-Maßnahmen:
-• AD-Konto sperren: ${d.ad_sperren?'✓':'✗'}
-• E-Mail weiterleiten an: ${d.email_weiter||'-'}
-• VPN sperren: ${d.vpn_sperren?'✓':'✗'}
-• Teams-Lizenz: ${d.teams_sperren?'✓':'✗'}
-• SharePoint: ${d.sharepoint?'✓':'✗'}
-
-Hardware-Rückgabe: ${d.hw_rueckgabe?'Ja':'Nein'}
-${d.hw_liste?'Details: '+d.hw_liste:''}
-
-Notizen: ${d.notizen||'-'}`.trim();
-
-      if(ticketSiteId&&ticketListId){
-        const colTitle =col(['Titel','Title'])||'Title';
-        const colStatus=col(['Status'])||'Status';
-        const colPrio  =col(['Priorität','Priority']);
-        const colDesc  =col(['Beschreibung','Description','Kommentar']);
-        const fields={[colTitle]:title};
-        if(colStatus) fields[colStatus]='Offen';
-        if(colPrio)   fields[colPrio]='Hoch';
-        if(colDesc)   fields[colDesc]=body;
-        await gPost(`/sites/${ticketSiteId}/lists/${ticketListId}/items`,{fields});
-        toast('✓ Offboarding-Ticket erstellt','success');
-        showPanel('tickets'); await loadTickets(true);
-      } else {
-        await navigator.clipboard.writeText(body).catch(()=>{});
-        toast('Offboarding-Details in Zwischenablage kopiert','info');
-      }
-    }
-  },
-  abwesenheit:{
-    title:'📅 Abwesenheitsnotiz',tag:'Formular',icon:'📅',
-    desc:'Automatische Abwesenheitsnotiz für Outlook konfigurieren und einrichten',
-    sections:[
-      {label:'Zeitraum',fields:[
-        {key:'von', label:'Abwesend von', type:'date', required:true},
-        {key:'bis', label:'Abwesend bis', type:'date', required:true},
-      ]},
-      {label:'Vertretung & Nachricht',fields:[
-        {key:'vertreter',label:'Vertretung (Name)',type:'text',placeholder:'Max Mustermann'},
-        {key:'vertr_mail',label:'Vertretung (E-Mail)',type:'email',placeholder:'m.mustermann@dihag.de'},
-        {key:'intern',label:'Interne Nachricht',type:'textarea',rows:4,
-          def:'Vielen Dank für Ihre Nachricht. Ich bin vom {{von}} bis {{bis}} abwesend.\nBei dringenden Angelegenheiten wenden Sie sich bitte an {{vertreter}} ({{vertr_mail}}).'},
-        {key:'extern',label:'Externe Nachricht (Englisch)',type:'textarea',rows:4,
-          def:'Thank you for your email. I am out of office from {{von}} to {{bis}}.\nFor urgent matters please contact {{vertreter}} ({{vertr_mail}}).'},
-      ]},
-    ],
-    submit:'📅 Nachricht erstellen & kopieren',
-    onSubmit: async d=>{
-      const fill=s=>s.replace(/\{\{von\}\}/g,d.von).replace(/\{\{bis\}\}/g,d.bis)
-                     .replace(/\{\{vertreter\}\}/g,d.vertreter||'').replace(/\{\{vertr_mail\}\}/g,d.vertr_mail||'');
-      const text=`INTERN:\n${fill(d.intern)}\n\nEXTERN:\n${fill(d.extern)}`;
-      await navigator.clipboard.writeText(text).catch(()=>{});
-      toast('✓ In Zwischenablage kopiert — jetzt in Outlook einfügen','success');
-      window.open('https://outlook.office.com/mail/options/mail/automaticReplies','_blank');
-    }
-  },
-};
-
-let currentAutoKey=null;
-
-function buildAutoGrid(){
-  const grid=$id('auto-grid'); grid.innerHTML='';
-  Object.entries(AUTO_FORMS).forEach(([key,form])=>{
-    const card=document.createElement('div'); card.className='auto-card';
-    card.innerHTML=`<div class="auto-card-icon">${form.icon}</div>
-      <div class="auto-card-title">${esc(form.title)}</div>
-      <div class="auto-card-desc">${esc(form.desc)}</div>
-      <div class="auto-card-tag">${esc(form.tag)}</div>`;
-    card.onclick=()=>openAutoForm(key);
-    grid.appendChild(card);
   });
-}
-
-function openAutoForm(key){
-  const form=AUTO_FORMS[key]; if(!form) return;
-  currentAutoKey=key;
-  $id('am-title').textContent=form.title;
-  $id('am-submit').textContent=form.submit;
-  const body=$id('am-body'); body.innerHTML='';
-  form.sections.forEach(sec=>{
-    const sh=document.createElement('div'); sh.className='form-section'; sh.textContent=sec.label;
-    body.appendChild(sh);
-    const row=document.createElement('div'); row.className='form-row'; body.appendChild(row);
-    sec.fields.forEach(f=>{
-      const wrap=document.createElement('div');
-      wrap.className='form-field'+(f.type==='textarea'||f.type==='checkbox'?f.type==='checkbox'?'':' full':'');
-      const def=f.def!==undefined?f.def:'';
-      if(f.type==='checkbox'){
-        wrap.innerHTML=`<div class="checkbox-row">
-          <input type="checkbox" id="af_${f.key}" data-key="${f.key}" ${def?'checked':''}>
-          <label for="af_${f.key}">${esc(f.label)}</label></div>`;
-      } else if(f.type==='textarea'){
-        wrap.style.gridColumn='1/-1';
-        wrap.innerHTML=`<label>${esc(f.label)}${f.required?'<span class="req">*</span>':''}</label>
-          <textarea data-key="${f.key}" rows="${f.rows||3}" placeholder="${f.placeholder||''}">${esc(String(def))}</textarea>`;
-      } else {
-        wrap.innerHTML=`<label>${esc(f.label)}${f.required?'<span class="req">*</span>':''}</label>
-          <input type="${f.type||'text'}" data-key="${f.key}" value="${esc(String(def))}" placeholder="${f.placeholder||''}"/>`;
-      }
-      row.appendChild(wrap);
-    });
-  });
-  $id('auto-modal').classList.add('open');
-}
-
-function closeAutoModal(){$id('auto-modal').classList.remove('open'); currentAutoKey=null;}
-
-async function submitAutoForm(){
-  if(!currentAutoKey) return;
-  const form=AUTO_FORMS[currentAutoKey];
-  const data={};
-  $id('am-body').querySelectorAll('[data-key]').forEach(el=>{
-    data[el.dataset.key]=el.type==='checkbox'?el.checked:el.value;
-  });
-  for(const sec of form.sections){
-    for(const f of sec.fields){
-      if(f.required&&!data[f.key]){toast('Pflichtfeld: '+f.label,'error');return;}
-    }
+  
+  if (filteredTickets.length > 3) {
+    debugLog(`... und ${filteredTickets.length - 3} weitere`, 'data');
   }
-  try{ await form.onSubmit(data); closeAutoModal(); }
-  catch(e){ toast('Fehler: '+e.message,'error'); }
+  
+  updateStats();
+  debugLog(`Rendering abgeschlossen`, 'step');
+}
+
+function updateStats() {
+  const stats = {
+    total: filteredTickets.length,
+    offen: filteredTickets.filter(t => t.status === 'Offen').length,
+    bearbeitung: filteredTickets.filter(t => t.status === 'In Bearbeitung').length,
+    erledigt: filteredTickets.filter(t => t.status === 'Erledigt').length
+  };
+  
+  document.getElementById('statTotal').textContent = stats.total;
+  document.getElementById('statOffen').textContent = stats.offen;
+  document.getElementById('statBearbeitung').textContent = stats.bearbeitung;
+  document.getElementById('statErledigt').textContent = stats.erledigt;
+  
+  debugLog(`Statistiken aktualisiert: ${stats.total} gesamt, ${stats.offen} offen, ${stats.bearbeitung} in Bearbeitung, ${stats.erledigt} erledigt`, 'data');
 }
 
 // ════════════════════════════════════════════════════════════════
-// BOOT
+// EVENT LISTENERS
 // ════════════════════════════════════════════════════════════════
-(async()=>{
-  try{
-    const ok = await initAuth();
-    if(ok){ bootDone(); }
-    else {
-      $id('boot-sub').textContent='Bitte anmelden';
-      $id('boot-spinner').style.display='none';
-      $id('boot-btn').style.display='block';
-    }
-  } catch(e){
-    $id('boot-err').textContent=e.message;
-    $id('boot-err').style.display='block';
-    $id('boot-spinner').style.display='none';
-    $id('boot-btn').style.display='block';
-  }
-})();
+document.getElementById('searchInput').addEventListener('input', (e) => {
+  filterTickets(e.target.value);
+});
+
+// ════════════════════════════════════════════════════════════════
+// INITIALIZATION
+// ════════════════════════════════════════════════════════════════
+debugLog('═══════════════════════════════════════════', 'step');
+debugLog('TICKETSYSTEM INITIALISIERUNG', 'step');
+debugLog('═══════════════════════════════════════════', 'step');
+debugLog(`Geladene Tickets: ${tickets.length}`, 'data');
+debugLog(`Standard-Sortierung: ${currentSort.field} (${currentSort.direction})`, 'data');
+
+// Initial sortieren und anzeigen
+sortTickets('erstellt_am', 'desc');
+
+debugLog('═══════════════════════════════════════════', 'step');
+debugLog('SYSTEM BEREIT', 'step');
+debugLog('═══════════════════════════════════════════', 'step');
 </script>
+
 </body>
 </html>
