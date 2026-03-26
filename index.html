@@ -687,13 +687,16 @@ async function streamTickets() {
   $id('tkt-empty').style.display='block';
   $id('tkt-empty').textContent='Lade Tickets…';
   $id('tkt-table').style.display='none';
-  dbg('streamTickets: Starte Laden (sortiert nach Erstellt am DESC)…');
-  let url=`/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$orderby=fields/Created desc&$top=100`;
+  // Filter: nur Tickets der letzten X Tage laden (vermeidet Listenansicht-Schwellenwert)
+  const filterDays = 90;
+  const filterDate = new Date(Date.now() - filterDays*86400000).toISOString();
+  dbg(`streamTickets: Lade Tickets erstellt seit ${filterDate} (letzte ${filterDays} Tage)…`);
+  let url=`/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$filter=fields/Created ge '${filterDate}'&$top=100`;
   let batchNr = 0;
   try {
     while (url) {
       batchNr++;
-      dbg(`Batch ${batchNr} laden…`, {url: url.substring(0,120)});
+      dbg(`Batch ${batchNr} laden…`, {url: url.substring(0,150)});
       const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
       const page = d.value||[];
       dbg(`Batch ${batchNr} empfangen`, {items: page.length});
