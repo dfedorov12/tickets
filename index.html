@@ -694,7 +694,7 @@ async function streamTickets() {
     while (url) {
       batchNr++;
       dbg(`Batch ${batchNr} laden…`, {url: url.substring(0,120)});
-      const d = await gGet(url);
+      const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
       const page = d.value||[];
       dbg(`Batch ${batchNr} empfangen`, {items: page.length});
       allTickets = [...allTickets, ...page];
