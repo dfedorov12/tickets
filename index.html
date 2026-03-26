@@ -687,35 +687,37 @@ async function streamTickets() {
   $id('tkt-empty').style.display='block';
   $id('tkt-empty').textContent='Lade Tickets…';
   $id('tkt-table').style.display='none';
-  // Filter: nur Tickets der letzten X Tage laden (vermeidet Listenansicht-Schwellenwert)
-  const filterDays = 90;
-  const filterDate = new Date(Date.now() - filterDays*86400000).toISOString();
-  dbg(`streamTickets: Lade Tickets erstellt seit ${filterDate} (letzte ${filterDays} Tage)…`);
-  let url=`/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$filter=fields/Created ge '${filterDate}'&$top=100`;
+
+  // ── PHASE 1: Letzte 5 Tage (schneller Erstload) ──
+  const recentDays = 5;
+  const recentDate = new Date(Date.now() - recentDays*86400000).toISOString();
+  dbg(`PHASE 1: Lade Tickets der letzten ${recentDays} Tage (seit ${recentDate})…`);
+  let url=`/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$filter=fields/Created ge '${recentDate}'&$top=100`;
   let batchNr = 0;
   try {
     while (url) {
       batchNr++;
-      dbg(`Batch ${batchNr} laden…`, {url: url.substring(0,150)});
+      dbg(`Phase 1 · Batch ${batchNr} laden…`, {url: url.substring(0,150)});
       const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
       const page = d.value||[];
-      dbg(`Batch ${batchNr} empfangen`, {items: page.length});
+      dbg(`Phase 1 · Batch ${batchNr} empfangen`, {items: page.length});
       allTickets = [...allTickets, ...page];
       url = d['@odata.nextLink']
         ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
-      // Safety: nochmal client-seitig nach Created DESC sortieren
       sortByCreatedDesc(allTickets);
       buildFilterOptions(allTickets);
       renderTickets(filterActive()?applyFilters(allTickets):allTickets.slice(0,displayedCount));
-      $id('tkt-count').textContent=allTickets.length+(url?'+ …':'')+' Tickets';
+      $id('tkt-count').textContent=allTickets.length+' Tickets (neueste)';
     }
-    allTicketsComplete=true;
-    renderLoadMore();
+    dbg(`PHASE 1 abgeschlossen ✓`, {tickets: allTickets.length});
     if(filterActive()) filterTickets();
-    dbg('Alle Tickets geladen ✓', {gesamt: allTickets.length});
-    console.log('[Tickets] done:', allTickets.length);
+    renderLoadMore();
+
+    // ── PHASE 2: Rest im Hintergrund nachladen ──
+    loadOlderTicketsInBackground(recentDate);
+
   } catch(e) {
-    dbg('FEHLER streamTickets', e.message);
+    dbg('FEHLER Phase 1', e.message);
     console.error('[Tickets]',e.message);
     if(allTickets.length) {
       renderTickets(allTickets.slice(0,displayedCount));
@@ -726,6 +728,43 @@ async function streamTickets() {
     }
   }
 }
+
+async function loadOlderTicketsInBackground(recentDate) {
+  dbg('PHASE 2: Lade ältere Tickets im Hintergrund…');
+  let url=`/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$filter=fields/Created lt '${recentDate}'&$top=100`;
+  let batchNr = 0;
+  const existingIds = new Set(allTickets.map(t=>t.id));
+  try {
+    while (url) {
+      batchNr++;
+      dbg(`Phase 2 · Batch ${batchNr} laden…`);
+      const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
+      const page = (d.value||[]).filter(it => !existingIds.has(it.id));
+      page.forEach(it => existingIds.add(it.id));
+      dbg(`Phase 2 · Batch ${batchNr} empfangen`, {neu: page.length, duplikate: (d.value||[]).length - page.length});
+      allTickets = [...allTickets, ...page];
+      url = d['@odata.nextLink']
+        ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+      sortByCreatedDesc(allTickets);
+      buildFilterOptions(allTickets);
+      if (!filterActive()) {
+        renderTickets(allTickets.slice(0, displayedCount));
+      }
+      $id('tkt-count').textContent=allTickets.length+(url?' + …':'')+' Tickets';
+    }
+    allTicketsComplete=true;
+    renderLoadMore();
+    if(filterActive()) filterTickets();
+    dbg(`PHASE 2 abgeschlossen ✓ — Gesamt: ${allTickets.length} Tickets im Cache`);
+    $id('tkt-count').textContent=allTickets.length+' Tickets';
+    console.log('[Tickets] komplett:', allTickets.length);
+  } catch(e) {
+    dbg('FEHLER Phase 2 (Hintergrund)', e.message);
+    console.warn('[Tickets Background]', e.message);
+    allTicketsComplete=true;
+    renderLoadMore();
+    $id('tkt-count').textContent=allTickets.length+' Tickets (teilweise)';
+  }
 
 
 function applyFilters(list) {
