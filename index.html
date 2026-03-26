@@ -234,6 +234,33 @@ header{
 .fs-desc-box a{color:var(--blue);word-break:break-all;}
 .fs-footer{padding:14px 24px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0;align-items:center;}
 .fs-status-changer{display:flex;gap:6px;margin-left:auto;}
+
+/* PERMISSIONS */
+.perm-section{margin-bottom:20px;}
+.perm-level{font-size:12px;font-weight:700;color:#fff;background:var(--navy);display:inline-flex;align-items:center;padding:3px 10px;border-radius:10px;margin-right:8px;}
+.perm-level-2{background:var(--navy2);}
+.perm-level-3{background:var(--navy3);}
+.perm-level-4{background:#2563eb;}
+.perm-hdr{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1.5px solid var(--border);margin-bottom:10px;}
+.perm-hdr-title{font-size:15px;font-weight:700;color:var(--navy);}
+.perm-card{background:#fff;border:1.5px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px;transition:all .15s;}
+.perm-card:hover{border-color:var(--navy);box-shadow:var(--shadow-sm);}
+.perm-card-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;cursor:pointer;}
+.perm-card-title{font-size:13px;font-weight:700;color:var(--navy);display:flex;align-items:center;gap:8px;}
+.perm-card-toggle{font-size:11px;color:var(--text-muted);padding:3px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;cursor:pointer;}
+.perm-members{display:flex;flex-direction:column;gap:4px;}
+.perm-member{display:flex;align-items:center;gap:8px;padding:5px 10px;background:var(--bg);border-radius:6px;font-size:12px;}
+.perm-member-icon{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;}
+.perm-member-name{font-weight:600;color:var(--text);}
+.perm-member-role{font-size:10px;color:var(--text-muted);margin-left:auto;padding:2px 8px;background:#fff;border-radius:4px;border:1px solid var(--border);}
+.perm-sub{margin-left:20px;border-left:2px solid var(--border);padding-left:16px;margin-top:8px;}
+.perm-folder{padding:8px 12px;background:var(--bg);border-radius:6px;margin-bottom:6px;font-size:12px;display:flex;align-items:center;gap:8px;cursor:pointer;transition:all .15s;}
+.perm-folder:hover{background:var(--navy);color:#fff;}
+.perm-folder.loading{opacity:.6;}
+.perm-inherit{font-size:10px;color:var(--green);font-weight:600;}
+.perm-unique{font-size:10px;color:var(--red);font-weight:600;}
+.perm-spinner{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--navy);border-radius:50%;animation:spin .8s linear infinite;display:inline-block;}
+.collapsed{display:none !important;}
 </style>
 </head>
 <body>
@@ -258,6 +285,7 @@ header{
     <nav class="hdr-nav">
       <button class="hdr-tab on" id="tab-tickets" onclick="showPanel('tickets')">🎫 Tickets</button>
       <button class="hdr-tab"    id="tab-reports" onclick="showPanel('reports')">📊 Reports</button>
+      <button class="hdr-tab"    id="tab-perms"   onclick="showPanel('perms')">🔒 Berechtigungen</button>
       <button class="hdr-tab"    id="tab-auto"    onclick="showPanel('auto')">⚡ Automatismen</button>
     </nav>
     <div class="hdr-right">
@@ -343,6 +371,22 @@ header{
       </div>
       <div style="padding:24px;display:flex;flex-direction:column;gap:24px;" id="reports-container">
         <div class="empty" id="rpt-empty">Daten werden geladen…</div>
+      </div>
+    </div>
+
+    <!-- PERMISSIONS PANEL -->
+    <div class="panel" id="panel-perms" style="overflow:auto;">
+      <div style="padding:20px 24px 12px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;">
+        <div style="font-size:17px;font-weight:700;color:var(--navy);">🔒 SharePoint Site-Berechtigungen</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:3px;">Sites nach Berechtigungen prüfen — 4 Stufen</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:12px;">
+          <input id="perm-site-url" class="tkt-search" placeholder="Site-URL eingeben, z.B. dihag.sharepoint.com:/sites/IT" style="flex:1;max-width:500px;"/>
+          <button class="btn btn-primary" onclick="startPermScan()" id="perm-scan-btn">🔍 Prüfen</button>
+        </div>
+        <div id="perm-status" style="font-size:11px;color:var(--text-muted);margin-top:8px;"></div>
+      </div>
+      <div style="padding:20px 24px;" id="perm-container">
+        <div class="empty" id="perm-empty">Site-URL eingeben und prüfen klicken</div>
       </div>
     </div>
 
@@ -667,7 +711,7 @@ function clearDebug() {
 // PANEL SWITCHING
 // ════════════════════════════════════════════════════════════════
 function showPanel(id) {
-  ['tickets','reports','auto'].forEach(p => {
+  ['tickets','reports','perms','auto'].forEach(p => {
     $id('panel-'+p).classList.toggle('active', p===id);
     $id('tab-'+p).classList.toggle('on', p===id);
   });
@@ -1010,16 +1054,17 @@ function openTicketDetail(id) {
   // Status quick-change
   const colStatus = col(['Status'])||'Status';
   const curStatus = f[colStatus]||f.Status||'Offen';
-  const statuses  = ['Offen','In Bearbeitung','Erledigt','Abgebrochen'];
-  const stColors  = {Offen:'var(--blue)',  'In Bearbeitung':'var(--yellow)',  Erledigt:'var(--green)',  Abgebrochen:'#6b7280'};
+  const statuses  = ['Offen','Neu','In Bearbeitung','Warten auf Rückmeldung','Erledigt','Abgebrochen'];
+  const stColors  = {Offen:'var(--blue)',Neu:'#6366f1','In Bearbeitung':'var(--yellow)','Warten auf Rückmeldung':'var(--orange)',Erledigt:'var(--green)',Abgebrochen:'#6b7280'};
 
   let html = `<div class="section-title">Status</div>
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:10px;">
       <span class="st-badge" style="font-size:12px;padding:5px 14px;background:${stColors[curStatus]||'#666'}22;color:${stColors[curStatus]||'#666'};">${esc(curStatus)}</span>
-      <span style="font-size:10px;color:var(--text-muted);margin:0 2px;">→</span>
-      ${statuses.filter(s=>s!==curStatus).map(s=>`<button class="status-btn"
-        style="color:${stColors[s]||'#666'};background:var(--bg);font-size:11px;"
-        onclick="changeStatus('${id}','${s}')">${s}</button>`).join('')}
+      <span style="font-size:10px;color:var(--text-muted);">→</span>
+      <select onchange="changeStatus('${id}',this.value)" style="padding:6px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer;">
+        <option value="">Status ändern…</option>
+        ${statuses.filter(s=>s!==curStatus).map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}
+      </select>
     </div>`;
 
   // All editable fields
@@ -1146,16 +1191,19 @@ function openTicketFullscreen(id) {
   const f = it.fields||{};
   const colStatus = col(['Status'])||'Status';
   const curStatus = f[colStatus]||f.Status||'Offen';
-  const statuses  = ['Offen','In Bearbeitung','Erledigt','Abgebrochen'];
-  const stColors  = {Offen:'var(--blue)','In Bearbeitung':'var(--yellow)',Erledigt:'var(--green)',Abgebrochen:'#6b7280'};
+  const statuses  = ['Offen','Neu','In Bearbeitung','Warten auf Rückmeldung','Erledigt','Abgebrochen'];
+  const stColors  = {Offen:'var(--blue)',Neu:'#6366f1','In Bearbeitung':'var(--yellow)','Warten auf Rückmeldung':'var(--orange)',Erledigt:'var(--green)',Abgebrochen:'#6b7280'};
 
   $id('fs-title').textContent = `Ticket #${id}`;
   $id('fs-status-badge').innerHTML = `<span class="fs-status-current" style="background:${stColors[curStatus]||'#666'}22;color:${stColors[curStatus]||'#666'};">${esc(curStatus)}</span>`;
   $id('fs-delete').onclick = ()=>{ closeFullscreen(); confirmDeleteTicket(id); };
 
-  // Status changer in footer
-  $id('fs-status-changer').innerHTML = `<span style="font-size:10px;color:var(--text-muted);margin-right:4px;">Status ändern:</span>` +
-    statuses.filter(s=>s!==curStatus).map(s=>`<button class="status-btn" style="color:${stColors[s]||'#666'};background:var(--bg);font-size:11px;" onclick="changeStatusFs('${id}','${s}')">${s}</button>`).join('');
+  // Status changer in footer as dropdown
+  $id('fs-status-changer').innerHTML = `<span style="font-size:10px;color:var(--text-muted);margin-right:4px;">Status ändern:</span>
+    <select onchange="if(this.value)changeStatusFs('${id}',this.value)" style="padding:5px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;font-size:11px;cursor:pointer;">
+      <option value="">Auswählen…</option>
+      ${statuses.filter(s=>s!==curStatus).map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}
+    </select>`;
 
   // Skip fields
   const skip = new Set([
@@ -1549,6 +1597,256 @@ function buildReports() {
   c.innerHTML = html;
   $id('rpt-info').textContent = `Basierend auf ${allTickets.length} Tickets`;
   dbg('Reports gerendert ✓');
+}
+
+// ════════════════════════════════════════════════════════════════
+// PERMISSIONS SYSTEM (4 Stufen)
+// ════════════════════════════════════════════════════════════════
+let permSiteId=null, permSiteUrl=null, permLibraries=[];
+
+async function spGet(url) {
+  const tok = await getSpToken();
+  const r = await fetch(url, {headers:{Authorization:'Bearer '+tok, Accept:'application/json;odata=verbose'}});
+  if (!r.ok) throw new Error(`SP ${r.status}: ${await r.text().catch(()=>'')}`);
+  return r.json();
+}
+
+function roleIcon(role) {
+  if (/Full Control|Vollzugriff/i.test(role)) return {bg:'var(--red)',icon:'👑'};
+  if (/Design|Entwerfen/i.test(role)) return {bg:'var(--orange)',icon:'🎨'};
+  if (/Edit|Bearbeiten|Contribute|Mitwirken/i.test(role)) return {bg:'var(--yellow)',icon:'✏️'};
+  if (/Read|Lesen|View/i.test(role)) return {bg:'var(--green)',icon:'👁️'};
+  return {bg:'#94a3b8',icon:'🔑'};
+}
+
+function renderMembers(roleAssignments) {
+  if (!roleAssignments?.length) return '<span style="font-size:11px;color:var(--text-muted);">Keine spezifischen Berechtigungen</span>';
+  return `<div class="perm-members">${roleAssignments.map(ra => {
+    const member = ra.Member;
+    const roles = (ra.RoleDefinitionBindings?.results||ra.RoleDefinitionBindings||[])
+      .map(r=>r.Name).filter(r=>r!=='Limited Access'&&r!=='Beschränkter Zugriff').join(', ');
+    if (!roles) return '';
+    const ri = roleIcon(roles);
+    const name = member.Title || member.LoginName || '?';
+    const type = member.PrincipalType === 8 ? '👥' : (member.PrincipalType===1?'👤':'🔑');
+    return `<div class="perm-member">
+      <div class="perm-member-icon" style="background:${ri.bg};">${ri.icon}</div>
+      <span>${type}</span>
+      <span class="perm-member-name">${esc(name)}</span>
+      <span class="perm-member-role">${esc(roles)}</span>
+    </div>`;
+  }).filter(Boolean).join('')}</div>`;
+}
+
+async function startPermScan() {
+  const input = $id('perm-site-url').value.trim();
+  if (!input) { toast('Bitte Site-URL eingeben','error'); return; }
+  $id('perm-scan-btn').disabled = true;
+  $id('perm-status').textContent = 'Verbinde…';
+  $id('perm-container').innerHTML = '<div class="perm-spinner" style="margin:20px auto;"></div>';
+  permLibraries = [];
+  try {
+    // Resolve site via Graph
+    const sitePath = input.replace(/^https?:\/\//,'');
+    dbg('Perm: Suche Site…', sitePath);
+    const site = await gGet(`/sites/${sitePath}`);
+    permSiteId = site.id;
+    permSiteUrl = site.webUrl; // e.g. https://dihag.sharepoint.com/sites/IT
+    dbg('Perm: Site gefunden', {id: permSiteId, url: permSiteUrl});
+
+    // ── STUFE 1: Site-Berechtigungen ──
+    $id('perm-status').innerHTML = '<span class="perm-spinner"></span> Stufe 1: Site-Berechtigungen…';
+    const sitePerms = await spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings`);
+    const siteRA = sitePerms.d?.results || [];
+    dbg('Stufe 1: Site RoleAssignments', {anzahl: siteRA.length});
+
+    let html = `<div class="perm-section">
+      <div class="perm-hdr"><span class="perm-level">Stufe 1</span><span class="perm-hdr-title">🌐 Site-Berechtigungen — ${esc(site.displayName)}</span></div>
+      ${renderMembers(siteRA)}
+    </div>`;
+
+    // ── STUFE 2: Bibliotheken, Listen, Unterseiten ──
+    $id('perm-status').innerHTML = '<span class="perm-spinner"></span> Stufe 2: Bibliotheken & Listen…';
+    const listsData = await spGet(`${permSiteUrl}/_api/web/lists?$filter=Hidden eq false&$select=Title,Id,BaseTemplate,HasUniqueRoleAssignments,ItemCount&$top=200`);
+    const lists = listsData.d?.results || [];
+    dbg('Stufe 2: Listen gefunden', {anzahl: lists.length});
+
+    const libs = lists.filter(l=>[101,700].includes(l.BaseTemplate)); // Document Libraries
+    const otherLists = lists.filter(l=>![101,700].includes(l.BaseTemplate));
+    permLibraries = libs;
+
+    // Subsites
+    let subsites = [];
+    try {
+      const subsData = await spGet(`${permSiteUrl}/_api/web/webs?$select=Title,Url,ServerRelativeUrl,HasUniqueRoleAssignments`);
+      subsites = subsData.d?.results || [];
+      dbg('Stufe 2: Unterseiten', {anzahl: subsites.length});
+    } catch(e) { dbg('Unterseiten-Fehler (ignoriert)', e.message); }
+
+    html += `<div class="perm-section">
+      <div class="perm-hdr"><span class="perm-level perm-level-2">Stufe 2</span><span class="perm-hdr-title">📚 Bibliotheken (${libs.length})</span></div>`;
+    for (const lib of libs) {
+      const uniqueTag = lib.HasUniqueRoleAssignments
+        ? '<span class="perm-unique">⚠ Eigene Berechtigung</span>'
+        : '<span class="perm-inherit">✓ Vererbt</span>';
+      let libPermsHtml = '';
+      if (lib.HasUniqueRoleAssignments) {
+        try {
+          const lp = await spGet(`${permSiteUrl}/_api/web/lists(guid'${lib.Id}')/roleassignments?$expand=Member,RoleDefinitionBindings`);
+          libPermsHtml = `<div class="perm-sub">${renderMembers(lp.d?.results||[])}</div>`;
+        } catch(e) { libPermsHtml = `<div class="perm-sub" style="color:var(--red);font-size:11px;">Fehler: ${esc(e.message)}</div>`; }
+      }
+      html += `<div class="perm-card">
+        <div class="perm-card-hdr" onclick="this.parentElement.querySelector('.perm-sub,.perm-folders')?.classList.toggle('collapsed')">
+          <div class="perm-card-title">📁 ${esc(lib.Title)} <span style="font-size:10px;color:var(--text-muted);">(${lib.ItemCount} Elemente)</span></div>
+          ${uniqueTag}
+        </div>
+        ${libPermsHtml}
+        <div class="perm-folders" id="perm-lib-${lib.Id.replace(/-/g,'')}" style="margin-top:8px;">
+          <div style="font-size:10px;color:var(--text-muted);padding:4px 0;">📂 Ordner werden im Hintergrund geladen…</div>
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
+
+    // Other lists
+    if (otherLists.length) {
+      html += `<div class="perm-section">
+        <div class="perm-hdr"><span class="perm-level perm-level-2">Stufe 2</span><span class="perm-hdr-title">📋 Listen (${otherLists.length})</span></div>`;
+      for (const lst of otherLists) {
+        const uniqueTag = lst.HasUniqueRoleAssignments
+          ? '<span class="perm-unique">⚠ Eigene Berechtigung</span>'
+          : '<span class="perm-inherit">✓ Vererbt</span>';
+        let lstPermsHtml = '';
+        if (lst.HasUniqueRoleAssignments) {
+          try {
+            const lp = await spGet(`${permSiteUrl}/_api/web/lists(guid'${lst.Id}')/roleassignments?$expand=Member,RoleDefinitionBindings`);
+            lstPermsHtml = `<div class="perm-sub">${renderMembers(lp.d?.results||[])}</div>`;
+          } catch(e) { lstPermsHtml = ''; }
+        }
+        html += `<div class="perm-card">
+          <div class="perm-card-title">📋 ${esc(lst.Title)} ${uniqueTag}</div>
+          ${lstPermsHtml}
+        </div>`;
+      }
+      html += `</div>`;
+    }
+
+    // Subsites
+    if (subsites.length) {
+      html += `<div class="perm-section">
+        <div class="perm-hdr"><span class="perm-level perm-level-2">Stufe 2</span><span class="perm-hdr-title">🌐 Unterseiten (${subsites.length})</span></div>`;
+      for (const sub of subsites) {
+        const uniqueTag = sub.HasUniqueRoleAssignments
+          ? '<span class="perm-unique">⚠ Eigene Berechtigung</span>'
+          : '<span class="perm-inherit">✓ Vererbt</span>';
+        html += `<div class="perm-card">
+          <div class="perm-card-title">🌐 ${esc(sub.Title)} ${uniqueTag}</div>
+          <div style="font-size:10px;color:var(--text-muted);">${esc(sub.Url)}</div>
+        </div>`;
+      }
+      html += `</div>`;
+    }
+
+    $id('perm-container').innerHTML = html;
+    $id('perm-status').innerHTML = '✓ Stufe 1+2 geladen. <span class="perm-spinner"></span> Ordner-Berechtigungen laden…';
+
+    // ── STUFE 3+4: Folder permissions (background) ──
+    await loadFolderPerms();
+
+  } catch(e) {
+    dbg('Perm FEHLER', e.message);
+    $id('perm-container').innerHTML = `<div class="empty" style="color:var(--red);">⚠ ${esc(e.message)}</div>`;
+    $id('perm-status').textContent = 'Fehler: ' + e.message;
+  }
+  $id('perm-scan-btn').disabled = false;
+}
+
+async function loadFolderPerms() {
+  for (const lib of permLibraries) {
+    const containerId = 'perm-lib-' + lib.Id.replace(/-/g,'');
+    const container = $id(containerId);
+    if (!container) continue;
+    try {
+      // Get drive for this library
+      dbg(`Stufe 3: Lade Ordner für "${lib.Title}"…`);
+      const drivesData = await gGet(`/sites/${permSiteId}/lists/${lib.Id}/drive`);
+      const driveId = drivesData.id;
+      const rootChildren = await gGet(`/sites/${permSiteId}/drives/${driveId}/root/children?$top=200`);
+      const folders = (rootChildren.value||[]).filter(f=>f.folder);
+
+      if (!folders.length) {
+        container.innerHTML = '<span style="font-size:10px;color:var(--text-muted);">Keine Ordner</span>';
+        continue;
+      }
+
+      let fHtml = `<div style="font-size:10px;font-weight:700;color:var(--navy);margin-bottom:6px;">📂 Stufe 3 — Ordner (1. Ebene):</div>`;
+      for (const folder of folders) {
+        // Check unique permissions via SP REST
+        let uniqueInfo = '';
+        try {
+          const relUrl = new URL(folder.webUrl).pathname;
+          const folderPerms = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(relUrl)}')/ListItemAllFields?$select=HasUniqueRoleAssignments`);
+          const hasUnique = folderPerms.d?.HasUniqueRoleAssignments;
+          if (hasUnique) {
+            uniqueInfo = '<span class="perm-unique">⚠ Eigene</span>';
+            // Load specific permissions
+            try {
+              const raData = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(relUrl)}')/ListItemAllFields/roleassignments?$expand=Member,RoleDefinitionBindings`);
+              uniqueInfo += `<div class="perm-sub" style="margin-top:4px;">${renderMembers(raData.d?.results||[])}</div>`;
+            } catch(e2) {}
+          } else {
+            uniqueInfo = '<span class="perm-inherit">✓ Vererbt</span>';
+          }
+        } catch(e) { uniqueInfo = '<span style="font-size:10px;color:var(--text-muted);">—</span>'; }
+
+        // Stufe 4: Sub-folders
+        let subFolderHtml = '';
+        try {
+          const subChildren = await gGet(`/sites/${permSiteId}/drives/${driveId}/items/${folder.id}/children?$top=100`);
+          const subFolders = (subChildren.value||[]).filter(f=>f.folder);
+          if (subFolders.length) {
+            subFolderHtml = `<div class="perm-sub" style="margin-top:6px;"><div style="font-size:9px;font-weight:700;color:var(--text-muted);margin-bottom:4px;">Stufe 4 — Unterordner:</div>`;
+            for (const sf of subFolders) {
+              let sfInfo = '';
+              try {
+                const sfRelUrl = new URL(sf.webUrl).pathname;
+                const sfP = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(sfRelUrl)}')/ListItemAllFields?$select=HasUniqueRoleAssignments`);
+                if (sfP.d?.HasUniqueRoleAssignments) {
+                  sfInfo = '<span class="perm-unique">⚠ Eigene</span>';
+                  try {
+                    const sfRA = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(sfRelUrl)}')/ListItemAllFields/roleassignments?$expand=Member,RoleDefinitionBindings`);
+                    sfInfo += `<div class="perm-sub" style="margin-top:2px;">${renderMembers(sfRA.d?.results||[])}</div>`;
+                  } catch {}
+                } else {
+                  sfInfo = '<span class="perm-inherit">✓ Vererbt</span>';
+                }
+              } catch { sfInfo = ''; }
+              subFolderHtml += `<div class="perm-folder" style="cursor:default;">📄 ${esc(sf.name)} ${sfInfo}</div>`;
+            }
+            subFolderHtml += '</div>';
+          }
+        } catch(e) { dbg('Stufe 4 Fehler', {folder: folder.name, err: e.message}); }
+
+        fHtml += `<div class="perm-card" style="padding:10px 12px;margin-bottom:6px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span>📂</span><span style="font-weight:600;font-size:12px;">${esc(folder.name)}</span>
+            <span style="font-size:10px;color:var(--text-muted);">(${folder.folder.childCount} Elemente)</span>
+            ${uniqueInfo.split('<div')[0]}
+          </div>
+          ${uniqueInfo.includes('<div')?uniqueInfo.substring(uniqueInfo.indexOf('<div')):''}
+          ${subFolderHtml}
+        </div>`;
+      }
+      container.innerHTML = fHtml;
+      dbg(`Stufe 3+4 fertig: "${lib.Title}"`, {ordner: folders.length});
+    } catch(e) {
+      dbg('Folder-Fehler', {lib: lib.Title, err: e.message});
+      if(container) container.innerHTML = `<span style="font-size:10px;color:var(--red);">${esc(e.message)}</span>`;
+    }
+  }
+  $id('perm-status').textContent = `✓ Alle 4 Stufen geladen (${permLibraries.length} Bibliotheken geprüft)`;
+  dbg('Berechtigungs-Scan komplett ✓');
 }
 
 // ════════════════════════════════════════════════════════════════
