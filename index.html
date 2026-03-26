@@ -687,8 +687,8 @@ async function streamTickets() {
   $id('tkt-empty').style.display='block';
   $id('tkt-empty').textContent='Lade Tickets…';
   $id('tkt-table').style.display='none';
-  dbg('streamTickets: Starte Laden…');
-  let url=`/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100`;
+  dbg('streamTickets: Starte Laden (sortiert nach Erstellt am DESC)…');
+  let url=`/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$orderby=fields/Created desc&$top=100`;
   let batchNr = 0;
   try {
     while (url) {
@@ -700,7 +700,7 @@ async function streamTickets() {
       allTickets = [...allTickets, ...page];
       url = d['@odata.nextLink']
         ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
-      // Sort by Created DESC and show after each batch
+      // Safety: nochmal client-seitig nach Created DESC sortieren
       sortByCreatedDesc(allTickets);
       buildFilterOptions(allTickets);
       renderTickets(filterActive()?applyFilters(allTickets):allTickets.slice(0,displayedCount));
