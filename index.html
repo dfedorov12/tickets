@@ -261,6 +261,28 @@ header{
 .perm-unique{font-size:10px;color:var(--red);font-weight:600;}
 .perm-spinner{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--navy);border-radius:50%;animation:spin .8s linear infinite;display:inline-block;}
 .collapsed{display:none !important;}
+
+/* TREE */
+.tree{padding:0;margin:0;}
+.tree-node{border-left:2px solid var(--border);margin-left:12px;padding-left:14px;}
+.tree-node:last-child{border-left-color:transparent;}
+.tree-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;margin:2px 0;font-size:12px;transition:all .12s;cursor:pointer;position:relative;}
+.tree-item:hover{background:var(--bg2);}
+.tree-item.active{background:var(--navy);color:#fff;}
+.tree-toggle{width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--text-dim);flex-shrink:0;transition:transform .15s;}
+.tree-toggle.open{transform:rotate(90deg);}
+.tree-icon{font-size:14px;flex-shrink:0;}
+.tree-label{font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tree-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:8px;white-space:nowrap;}
+.tree-children{overflow:hidden;transition:max-height .25s ease;}
+.tree-loading{font-size:11px;color:var(--text-muted);padding:6px 12px;display:flex;align-items:center;gap:6px;}
+
+/* SITE SUGGESTIONS */
+.perm-sug{padding:10px 14px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);transition:background .1s;}
+.perm-sug:hover,.perm-sug.active{background:var(--bg2);}
+.perm-sug:last-child{border-bottom:none;}
+.perm-sug-name{font-weight:600;color:var(--navy);}
+.perm-sug-url{font-size:10px;color:var(--text-muted);}
 </style>
 </head>
 <body>
@@ -285,6 +307,7 @@ header{
     <nav class="hdr-nav">
       <button class="hdr-tab on" id="tab-tickets" onclick="showPanel('tickets')">🎫 Tickets</button>
       <button class="hdr-tab"    id="tab-reports" onclick="showPanel('reports')">📊 Reports</button>
+      <button class="hdr-tab"    id="tab-devices" onclick="showPanel('devices')">💻 Geräte</button>
       <button class="hdr-tab"    id="tab-perms"   onclick="showPanel('perms')">🔒 Berechtigungen</button>
       <button class="hdr-tab"    id="tab-auto"    onclick="showPanel('auto')">⚡ Automatismen</button>
     </nav>
@@ -374,19 +397,51 @@ header{
       </div>
     </div>
 
+    <!-- DEVICES PANEL (Azure Geräte) -->
+    <div class="panel" id="panel-devices" style="display:none;flex-direction:column;">
+      <div class="tkt-toolbar">
+        <input class="tkt-search" id="dev-search" placeholder="🔍 Gerät suchen…" oninput="filterDevices()" style="flex:1;max-width:340px;"/>
+        <span id="dev-count" style="font-size:11px;color:var(--text-muted);margin-left:4px;white-space:nowrap;"></span>
+        <div style="margin-left:auto;">
+          <button class="hdr-btn" onclick="loadDevices(true)">🔄</button>
+        </div>
+      </div>
+      <div class="tkt-main">
+        <div style="flex:1;overflow:auto;" id="dev-table-wrap">
+          <div class="empty" id="dev-empty">Lade Geräte…</div>
+          <table class="tkt-table" id="dev-table" style="display:none;">
+            <thead><tr id="dev-thead"></tr></thead>
+            <tbody id="dev-tbody"></tbody>
+          </table>
+        </div>
+        <!-- DEVICE DETAIL SIDEBAR -->
+        <div class="tkt-sidebar" id="dev-sidebar">
+          <div class="tkt-sidebar-hdr">
+            <div style="font-size:14px;font-weight:700;color:var(--navy);" id="dev-sb-title">Gerät</div>
+            <button class="tkt-close" onclick="closeDevSidebar()">✕</button>
+          </div>
+          <div class="tkt-sidebar-body" id="dev-sb-body"></div>
+          <div class="sidebar-actions" id="dev-sb-actions"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- PERMISSIONS PANEL -->
     <div class="panel" id="panel-perms" style="overflow:auto;">
       <div style="padding:20px 24px 12px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;">
         <div style="font-size:17px;font-weight:700;color:var(--navy);">🔒 SharePoint Site-Berechtigungen</div>
-        <div style="font-size:12px;color:var(--text-dim);margin-top:3px;">Sites nach Berechtigungen prüfen — 4 Stufen</div>
-        <div style="display:flex;gap:8px;align-items:center;margin-top:12px;">
-          <input id="perm-site-url" class="tkt-search" placeholder="Site-URL eingeben, z.B. dihag.sharepoint.com:/sites/IT" style="flex:1;max-width:500px;"/>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:3px;">Site suchen → Baumstruktur der Berechtigungen (4 Stufen)</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:12px;position:relative;">
+          <div style="position:relative;flex:1;max-width:500px;">
+            <input id="perm-site-url" class="tkt-search" placeholder="Site suchen… z.B. IT, Intranet, HR" style="width:100%;" oninput="searchSites(this.value)" autocomplete="off"/>
+            <div id="perm-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border2);border-top:none;border-radius:0 0 8px 8px;max-height:240px;overflow:auto;z-index:50;box-shadow:var(--shadow);"></div>
+          </div>
           <button class="btn btn-primary" onclick="startPermScan()" id="perm-scan-btn">🔍 Prüfen</button>
         </div>
         <div id="perm-status" style="font-size:11px;color:var(--text-muted);margin-top:8px;"></div>
       </div>
       <div style="padding:20px 24px;" id="perm-container">
-        <div class="empty" id="perm-empty">Site-URL eingeben und prüfen klicken</div>
+        <div class="empty" id="perm-empty">Site suchen und auswählen</div>
       </div>
     </div>
 
@@ -711,13 +766,16 @@ function clearDebug() {
 // PANEL SWITCHING
 // ════════════════════════════════════════════════════════════════
 function showPanel(id) {
-  ['tickets','reports','perms','auto'].forEach(p => {
-    $id('panel-'+p).classList.toggle('active', p===id);
-    $id('tab-'+p).classList.toggle('on', p===id);
+  ['tickets','reports','devices','perms','auto'].forEach(p => {
+    const panel = $id('panel-'+p);
+    const tab = $id('tab-'+p);
+    if(panel) panel.classList.toggle('active', p===id);
+    if(tab) tab.classList.toggle('on', p===id);
   });
   $id('btn-new').style.display = id==='tickets' ? '' : 'none';
   $id('btn-refresh').style.display = id==='tickets' ? '' : 'none';
   if (id==='reports' && allTickets.length) buildReports();
+  if (id==='devices' && !allDevices.length) loadDevices();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1600,9 +1658,231 @@ function buildReports() {
 }
 
 // ════════════════════════════════════════════════════════════════
-// PERMISSIONS SYSTEM (4 Stufen)
+// ════════════════════════════════════════════════════════════════
+// DEVICES (Azure Geräte)
+// ════════════════════════════════════════════════════════════════
+const DEV_SITE = 'dihag.sharepoint.com:/sites/IT';
+const DEV_LIST_NAME = 'AzureGerte';
+let devSiteId=null, devListId=null, devCols={}, allDevices=[], devEditingId=null;
+
+async function loadDevices(force) {
+  if (!force && allDevices.length) return;
+  allDevices = [];
+  $id('dev-empty').style.display='block';
+  $id('dev-empty').textContent='Lade Geräte…';
+  $id('dev-table').style.display='none';
+  try {
+    if (!devSiteId) {
+      const site = await gGet(`/sites/${DEV_SITE}`);
+      devSiteId = site.id;
+    }
+    if (!devListId) {
+      const lists = await gGet(`/sites/${devSiteId}/lists?$select=id,name,displayName&$top=100`);
+      const lst = (lists.value||[]).find(l=>l.name===DEV_LIST_NAME||l.displayName===DEV_LIST_NAME)
+               || (lists.value||[]).find(l=>l.name.toLowerCase().includes('azure')||l.displayName.toLowerCase().includes('azure'));
+      if (!lst) throw new Error('Liste nicht gefunden: '+(lists.value||[]).map(l=>l.displayName).join(', '));
+      devListId = lst.id;
+      const cols = await gGet(`/sites/${devSiteId}/lists/${devListId}/columns?$top=200`);
+      (cols.value||[]).forEach(c=>{ if(!c.readOnly) devCols[c.name]=c.displayName; });
+    }
+    // Load items
+    let url = `/sites/${devSiteId}/lists/${devListId}/items?$expand=fields&$top=100`;
+    while (url) {
+      const d = await gGet(url);
+      allDevices = [...allDevices, ...(d.value||[])];
+      url = d['@odata.nextLink'] ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+    }
+    dbg('Geräte geladen', {anzahl: allDevices.length, spalten: Object.keys(devCols)});
+    buildDevTable();
+  } catch(e) {
+    dbg('Geräte FEHLER', e.message);
+    $id('dev-empty').textContent='⚠ '+e.message;
+    $id('dev-empty').style.color='var(--red)';
+  }
+}
+
+function devCol(names) {
+  const arr = Array.isArray(names)?names:[names];
+  for (const n of arr) {
+    if (devCols[n]) return n;
+    const f = Object.keys(devCols).find(k=>k.toLowerCase()===n.toLowerCase()||(devCols[k]||'').toLowerCase()===n.toLowerCase());
+    if (f) return f;
+  }
+  return null;
+}
+
+function buildDevTable() {
+  if (!allDevices.length) { $id('dev-empty').textContent='Keine Geräte'; return; }
+  // Build dynamic headers from first few items
+  const skip = new Set(['ContentType','_UIVersionString','Attachments','ID','AuthorLookupId','EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount','ComplianceAssetId']);
+  const colKeys = [];
+  const seen = new Set();
+  allDevices.slice(0,10).forEach(it => {
+    Object.keys(it.fields||{}).forEach(k => {
+      if (!seen.has(k) && !skip.has(k) && !k.startsWith('_') && !k.startsWith('@odata')) {
+        seen.add(k); colKeys.push(k);
+      }
+    });
+  });
+  // Limit to first 8 columns for table
+  const showCols = colKeys.slice(0,8);
+  $id('dev-thead').innerHTML = '<th>#</th>' + showCols.map(k=>`<th>${esc(devCols[k]||k)}</th>`).join('');
+  renderDevices(allDevices, showCols);
+  $id('dev-count').textContent = allDevices.length + ' Geräte';
+}
+
+function renderDevices(list, showCols) {
+  if (!showCols) {
+    const skip = new Set(['ContentType','_UIVersionString','Attachments','ID','AuthorLookupId','EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount','ComplianceAssetId']);
+    showCols = [];
+    const seen = new Set();
+    allDevices.slice(0,10).forEach(it => {
+      Object.keys(it.fields||{}).forEach(k => {
+        if (!seen.has(k) && !skip.has(k) && !k.startsWith('_') && !k.startsWith('@odata')) { seen.add(k); showCols.push(k); }
+      });
+    });
+    showCols = showCols.slice(0,8);
+  }
+  const tbody = $id('dev-tbody');
+  $id('dev-empty').style.display = list.length ? 'none' : 'block';
+  $id('dev-table').style.display = list.length ? '' : 'none';
+  tbody.innerHTML = list.map(it => {
+    const f = it.fields||{};
+    return `<tr class="clickable" onclick="openDevDetail('${it.id}')">
+      <td style="font-weight:600;color:var(--navy);">#${it.id}</td>
+      ${showCols.map(k=>{
+        let v = f[k];
+        if (isRichText(v)) v = cleanHtml(v).replace(/<[^>]+>/g,'').substring(0,60);
+        else if (typeof v==='object') v = personName(v);
+        else v = esc(String(v||'')).substring(0,60);
+        return `<td style="font-size:11px;">${v}</td>`;
+      }).join('')}
+    </tr>`;
+  }).join('');
+}
+
+function filterDevices() {
+  const q = ($id('dev-search').value||'').toLowerCase();
+  const filtered = allDevices.filter(it => {
+    const f = it.fields||{};
+    return Object.values(f).some(v => String(v||'').toLowerCase().includes(q));
+  });
+  renderDevices(filtered);
+  $id('dev-count').textContent = filtered.length + '/' + allDevices.length + ' Geräte';
+}
+
+function openDevDetail(id) {
+  const it = allDevices.find(t=>t.id==id);
+  if (!it) return;
+  devEditingId = id;
+  const f = it.fields||{};
+  $id('dev-sb-title').textContent = `Gerät #${id}`;
+  const skip = new Set(['ContentType','_UIVersionString','Attachments','ID','AuthorLookupId','EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount','ComplianceAssetId','Modified','Created','Author','Editor']);
+  let html = '';
+  Object.entries(f).forEach(([k,v])=>{
+    if(skip.has(k)||k.startsWith('_')||k.startsWith('@odata')||v===null||v===undefined||v==='') return;
+    const label = devCols[k]||k;
+    if (isRichText(v)) {
+      html+=`<div class="field-row"><label>${esc(label)}</label>
+        <div class="desc-box" style="padding:8px 10px;border:1.5px solid var(--border2);border-radius:6px;font-size:12px;line-height:1.6;background:var(--bg);">${cleanHtml(v)}</div>
+        <textarea data-fk="${esc(k)}" style="display:none;font-size:12px;margin-top:4px;" rows="3">${esc(String(v))}</textarea>
+        <button onclick="this.previousElementSibling.style.display='';this.previousElementSibling.previousElementSibling.style.display='none';this.style.display='none';" style="font-size:10px;color:var(--blue);background:none;border:none;cursor:pointer;margin-top:2px;">✏️</button>
+      </div>`;
+    } else if (typeof v==='string'&&v.startsWith('[')||Array.isArray(v)) {
+      html+=`<div class="field-row"><label>${esc(label)}</label>
+        <input value="${esc(personName(v))}" style="font-size:12px;background:var(--bg);" readonly/></div>`;
+    } else {
+      const valStr = typeof v==='object'?(v?.LookupValue||v?.displayName||JSON.stringify(v)):String(v);
+      html+=`<div class="field-row"><label>${esc(label)}</label>
+        <input data-fk="${esc(k)}" value="${esc(valStr)}" style="font-size:12px;"/></div>`;
+    }
+  });
+  html+=`<div style="font-size:10px;color:var(--text-muted);margin-top:8px;">Erstellt: ${fmtFull(it.createdDateTime)}</div>`;
+  $id('dev-sb-body').innerHTML = html;
+  $id('dev-sb-actions').innerHTML = `
+    <button class="btn btn-primary" onclick="saveDevSidebar('${id}')" style="flex:1;">✓ Speichern</button>
+    <button class="btn btn-ghost" onclick="closeDevSidebar()">Schließen</button>`;
+  $id('dev-sidebar').classList.add('open');
+}
+
+function closeDevSidebar() { $id('dev-sidebar').classList.remove('open'); devEditingId=null; }
+
+async function saveDevSidebar(id) {
+  const fields={};
+  $id('dev-sb-body').querySelectorAll('[data-fk]').forEach(el=>{ if(el.value) fields[el.dataset.fk]=el.value; });
+  try {
+    await gPatch(`/sites/${devSiteId}/lists/${devListId}/items/${id}/fields`, fields);
+    const it = allDevices.find(t=>t.id==id);
+    if(it) Object.assign(it.fields, fields);
+    toast('Gespeichert ✓','success');
+    buildDevTable();
+  } catch(e) { toast('Fehler: '+e.message,'error'); }
+}
+
+// ════════════════════════════════════════════════════════════════
+// PERMISSIONS SYSTEM (Tree-based, 4 Stufen)
 // ════════════════════════════════════════════════════════════════
 let permSiteId=null, permSiteUrl=null, permLibraries=[];
+let searchTimeout=null;
+
+// Clean URL: strip AllItems.aspx, list paths, etc.
+function cleanSiteInput(input) {
+  let s = input.trim();
+  // Remove protocol
+  s = s.replace(/^https?:\/\//,'');
+  // Strip /Lists/xxx/AllItems.aspx or /AllItems.aspx
+  s = s.replace(/\/Lists\/[^/]+\/[^/]*$/i,'');
+  s = s.replace(/\/AllItems\.aspx.*$/i,'');
+  // Strip /Freigegebene Dokumente/... etc
+  s = s.replace(/\/Freigegebene%20Dokumente.*$/i,'');
+  s = s.replace(/\/Shared%20Documents.*$/i,'');
+  // Strip /SitePages/...
+  s = s.replace(/\/SitePages\/.*$/i,'');
+  // Strip /_layouts/...
+  s = s.replace(/\/_layouts\/.*$/i,'');
+  // If it looks like dihag.sharepoint.com/sites/X, convert to graph format
+  const m = s.match(/^([\w.-]+\.sharepoint\.com)(\/sites\/[^/?#]+)/i);
+  if (m) return m[1]+':'+m[2];
+  return s;
+}
+
+async function searchSites(query) {
+  clearTimeout(searchTimeout);
+  const box = $id('perm-suggestions');
+  if (!query || query.length < 2) { box.style.display='none'; return; }
+  searchTimeout = setTimeout(async () => {
+    try {
+      // Search sites via Graph
+      const d = await gGet(`/sites?search=${encodeURIComponent(query)}&$top=8`);
+      const sites = d.value||[];
+      if (!sites.length) { box.innerHTML='<div class="perm-sug" style="color:var(--text-muted);">Keine Sites gefunden</div>'; box.style.display='block'; return; }
+      box.innerHTML = sites.map(s => `<div class="perm-sug" onclick="selectPermSite('${esc(s.id)}','${esc(s.webUrl)}','${esc(s.displayName)}')">
+        <span style="font-size:16px;">🌐</span>
+        <div><div class="perm-sug-name">${esc(s.displayName)}</div><div class="perm-sug-url">${esc(s.webUrl)}</div></div>
+      </div>`).join('');
+      box.style.display='block';
+    } catch(e) {
+      box.innerHTML=`<div class="perm-sug" style="color:var(--red);">Fehler: ${esc(e.message)}</div>`;
+      box.style.display='block';
+    }
+  }, 350);
+}
+
+function selectPermSite(siteId, webUrl, name) {
+  permSiteId = siteId;
+  permSiteUrl = webUrl;
+  $id('perm-site-url').value = name;
+  $id('perm-suggestions').style.display='none';
+  dbg('Site ausgewählt', {siteId, webUrl, name});
+  startPermScan();
+}
+
+// Close suggestions on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('#perm-site-url') && !e.target.closest('#perm-suggestions')) {
+    const box=$id('perm-suggestions'); if(box) box.style.display='none';
+  }
+});
 
 async function spGet(url) {
   const tok = await getSpToken();
@@ -1619,140 +1899,156 @@ function roleIcon(role) {
   return {bg:'#94a3b8',icon:'🔑'};
 }
 
-function renderMembers(roleAssignments) {
-  if (!roleAssignments?.length) return '<span style="font-size:11px;color:var(--text-muted);">Keine spezifischen Berechtigungen</span>';
-  return `<div class="perm-members">${roleAssignments.map(ra => {
+function renderMembersTree(roleAssignments) {
+  if (!roleAssignments?.length) return '<div class="tree-loading">Keine spezifischen Berechtigungen</div>';
+  return roleAssignments.map(ra => {
     const member = ra.Member;
     const roles = (ra.RoleDefinitionBindings?.results||ra.RoleDefinitionBindings||[])
       .map(r=>r.Name).filter(r=>r!=='Limited Access'&&r!=='Beschränkter Zugriff').join(', ');
     if (!roles) return '';
     const ri = roleIcon(roles);
-    const name = member.Title || member.LoginName || '?';
-    const type = member.PrincipalType === 8 ? '👥' : (member.PrincipalType===1?'👤':'🔑');
+    const type = member.PrincipalType===8?'👥':(member.PrincipalType===1?'👤':'🔑');
     return `<div class="perm-member">
       <div class="perm-member-icon" style="background:${ri.bg};">${ri.icon}</div>
       <span>${type}</span>
-      <span class="perm-member-name">${esc(name)}</span>
+      <span class="perm-member-name">${esc(member.Title||member.LoginName||'?')}</span>
       <span class="perm-member-role">${esc(roles)}</span>
     </div>`;
-  }).filter(Boolean).join('')}</div>`;
+  }).filter(Boolean).join('');
+}
+
+let treeIdCounter = 0;
+function treeNode(icon, label, badge, children, expandId) {
+  const id = expandId || ('tn_'+(treeIdCounter++));
+  const hasSub = children !== undefined;
+  return `<div class="tree-node">
+    <div class="tree-item" onclick="${hasSub?`toggleTree('${id}')`:''}" ${!hasSub?'style="cursor:default;"':''}>
+      ${hasSub?`<span class="tree-toggle" id="tg_${id}">▶</span>`:'<span style="width:18px;"></span>'}
+      <span class="tree-icon">${icon}</span>
+      <span class="tree-label">${label}</span>
+      ${badge||''}
+    </div>
+    ${hasSub?`<div class="tree-children" id="${id}" style="display:none;">${children}</div>`:''}
+  </div>`;
+}
+
+function toggleTree(id) {
+  const el = $id(id);
+  const tg = $id('tg_'+id);
+  if (!el) return;
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  if (tg) tg.classList.toggle('open', !open);
 }
 
 async function startPermScan() {
-  const input = $id('perm-site-url').value.trim();
-  if (!input) { toast('Bitte Site-URL eingeben','error'); return; }
+  // If site was selected via autocomplete, permSiteId is set
+  if (!permSiteId) {
+    const input = $id('perm-site-url').value.trim();
+    if (!input) { toast('Bitte Site suchen und auswählen','error'); return; }
+    const clean = cleanSiteInput(input);
+    dbg('Perm: Site-Eingabe bereinigt', {original: input, clean});
+    try {
+      const site = await gGet(`/sites/${clean}`);
+      permSiteId = site.id;
+      permSiteUrl = site.webUrl;
+    } catch(e) {
+      toast('Site nicht gefunden: '+e.message,'error');
+      return;
+    }
+  }
+
   $id('perm-scan-btn').disabled = true;
-  $id('perm-status').textContent = 'Verbinde…';
+  $id('perm-suggestions').style.display='none';
+  $id('perm-status').innerHTML = '<span class="perm-spinner"></span> Stufe 1: Site-Berechtigungen…';
   $id('perm-container').innerHTML = '<div class="perm-spinner" style="margin:20px auto;"></div>';
   permLibraries = [];
-  try {
-    // Resolve site via Graph
-    const sitePath = input.replace(/^https?:\/\//,'');
-    dbg('Perm: Suche Site…', sitePath);
-    const site = await gGet(`/sites/${sitePath}`);
-    permSiteId = site.id;
-    permSiteUrl = site.webUrl; // e.g. https://dihag.sharepoint.com/sites/IT
-    dbg('Perm: Site gefunden', {id: permSiteId, url: permSiteUrl});
+  treeIdCounter = 0;
 
-    // ── STUFE 1: Site-Berechtigungen ──
-    $id('perm-status').innerHTML = '<span class="perm-spinner"></span> Stufe 1: Site-Berechtigungen…';
+  try {
+    const siteName = permSiteUrl.split('/').pop();
+
+    // ── STUFE 1: Site perms ──
     const sitePerms = await spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings`);
     const siteRA = sitePerms.d?.results || [];
-    dbg('Stufe 1: Site RoleAssignments', {anzahl: siteRA.length});
+    dbg('Stufe 1', {members: siteRA.length});
 
-    let html = `<div class="perm-section">
-      <div class="perm-hdr"><span class="perm-level">Stufe 1</span><span class="perm-hdr-title">🌐 Site-Berechtigungen — ${esc(site.displayName)}</span></div>
-      ${renderMembers(siteRA)}
-    </div>`;
+    const siteMembers = `<div class="perm-members" style="padding:4px 0;">${renderMembersTree(siteRA)}</div>`;
 
-    // ── STUFE 2: Bibliotheken, Listen, Unterseiten ──
+    // ── STUFE 2 ──
     $id('perm-status').innerHTML = '<span class="perm-spinner"></span> Stufe 2: Bibliotheken & Listen…';
     const listsData = await spGet(`${permSiteUrl}/_api/web/lists?$filter=Hidden eq false&$select=Title,Id,BaseTemplate,HasUniqueRoleAssignments,ItemCount&$top=200`);
     const lists = listsData.d?.results || [];
-    dbg('Stufe 2: Listen gefunden', {anzahl: lists.length});
-
-    const libs = lists.filter(l=>[101,700].includes(l.BaseTemplate)); // Document Libraries
+    const libs = lists.filter(l=>[101,700].includes(l.BaseTemplate));
     const otherLists = lists.filter(l=>![101,700].includes(l.BaseTemplate));
     permLibraries = libs;
 
-    // Subsites
     let subsites = [];
     try {
-      const subsData = await spGet(`${permSiteUrl}/_api/web/webs?$select=Title,Url,ServerRelativeUrl,HasUniqueRoleAssignments`);
-      subsites = subsData.d?.results || [];
-      dbg('Stufe 2: Unterseiten', {anzahl: subsites.length});
-    } catch(e) { dbg('Unterseiten-Fehler (ignoriert)', e.message); }
+      const sd = await spGet(`${permSiteUrl}/_api/web/webs?$select=Title,Url,HasUniqueRoleAssignments`);
+      subsites = sd.d?.results || [];
+    } catch {}
 
-    html += `<div class="perm-section">
-      <div class="perm-hdr"><span class="perm-level perm-level-2">Stufe 2</span><span class="perm-hdr-title">📚 Bibliotheken (${libs.length})</span></div>`;
+    // Build library nodes
+    let libNodes = '';
     for (const lib of libs) {
-      const uniqueTag = lib.HasUniqueRoleAssignments
-        ? '<span class="perm-unique">⚠ Eigene Berechtigung</span>'
-        : '<span class="perm-inherit">✓ Vererbt</span>';
-      let libPermsHtml = '';
+      const uTag = lib.HasUniqueRoleAssignments
+        ? '<span class="tree-badge" style="background:var(--red-bg);color:var(--red);">⚠ Eigene</span>'
+        : '<span class="tree-badge" style="background:var(--green-bg);color:var(--green);">✓ Vererbt</span>';
+      let libPerms = '';
       if (lib.HasUniqueRoleAssignments) {
         try {
           const lp = await spGet(`${permSiteUrl}/_api/web/lists(guid'${lib.Id}')/roleassignments?$expand=Member,RoleDefinitionBindings`);
-          libPermsHtml = `<div class="perm-sub">${renderMembers(lp.d?.results||[])}</div>`;
-        } catch(e) { libPermsHtml = `<div class="perm-sub" style="color:var(--red);font-size:11px;">Fehler: ${esc(e.message)}</div>`; }
+          libPerms = `<div class="perm-members" style="padding:4px 0 4px 6px;">${renderMembersTree(lp.d?.results||[])}</div>`;
+        } catch { libPerms = ''; }
       }
-      html += `<div class="perm-card">
-        <div class="perm-card-hdr" onclick="this.parentElement.querySelector('.perm-sub,.perm-folders')?.classList.toggle('collapsed')">
-          <div class="perm-card-title">📁 ${esc(lib.Title)} <span style="font-size:10px;color:var(--text-muted);">(${lib.ItemCount} Elemente)</span></div>
-          ${uniqueTag}
-        </div>
-        ${libPermsHtml}
-        <div class="perm-folders" id="perm-lib-${lib.Id.replace(/-/g,'')}" style="margin-top:8px;">
-          <div style="font-size:10px;color:var(--text-muted);padding:4px 0;">📂 Ordner werden im Hintergrund geladen…</div>
-        </div>
-      </div>`;
-    }
-    html += `</div>`;
-
-    // Other lists
-    if (otherLists.length) {
-      html += `<div class="perm-section">
-        <div class="perm-hdr"><span class="perm-level perm-level-2">Stufe 2</span><span class="perm-hdr-title">📋 Listen (${otherLists.length})</span></div>`;
-      for (const lst of otherLists) {
-        const uniqueTag = lst.HasUniqueRoleAssignments
-          ? '<span class="perm-unique">⚠ Eigene Berechtigung</span>'
-          : '<span class="perm-inherit">✓ Vererbt</span>';
-        let lstPermsHtml = '';
-        if (lst.HasUniqueRoleAssignments) {
-          try {
-            const lp = await spGet(`${permSiteUrl}/_api/web/lists(guid'${lst.Id}')/roleassignments?$expand=Member,RoleDefinitionBindings`);
-            lstPermsHtml = `<div class="perm-sub">${renderMembers(lp.d?.results||[])}</div>`;
-          } catch(e) { lstPermsHtml = ''; }
-        }
-        html += `<div class="perm-card">
-          <div class="perm-card-title">📋 ${esc(lst.Title)} ${uniqueTag}</div>
-          ${lstPermsHtml}
-        </div>`;
-      }
-      html += `</div>`;
+      const folderId = 'lib_'+lib.Id.replace(/-/g,'');
+      libNodes += treeNode('📁', `${esc(lib.Title)} <span style="font-size:10px;color:var(--text-muted);">(${lib.ItemCount})</span>`, uTag,
+        libPerms + `<div id="${folderId}" class="tree-loading"><span class="perm-spinner"></span> Ordner laden…</div>`, folderId+'_wrap');
     }
 
-    // Subsites
-    if (subsites.length) {
-      html += `<div class="perm-section">
-        <div class="perm-hdr"><span class="perm-level perm-level-2">Stufe 2</span><span class="perm-hdr-title">🌐 Unterseiten (${subsites.length})</span></div>`;
-      for (const sub of subsites) {
-        const uniqueTag = sub.HasUniqueRoleAssignments
-          ? '<span class="perm-unique">⚠ Eigene Berechtigung</span>'
-          : '<span class="perm-inherit">✓ Vererbt</span>';
-        html += `<div class="perm-card">
-          <div class="perm-card-title">🌐 ${esc(sub.Title)} ${uniqueTag}</div>
-          <div style="font-size:10px;color:var(--text-muted);">${esc(sub.Url)}</div>
-        </div>`;
+    // List nodes
+    let listNodes = '';
+    for (const lst of otherLists) {
+      const uTag = lst.HasUniqueRoleAssignments
+        ? '<span class="tree-badge" style="background:var(--red-bg);color:var(--red);">⚠ Eigene</span>'
+        : '<span class="tree-badge" style="background:var(--green-bg);color:var(--green);">✓ Vererbt</span>';
+      let lp = '';
+      if (lst.HasUniqueRoleAssignments) {
+        try {
+          const d = await spGet(`${permSiteUrl}/_api/web/lists(guid'${lst.Id}')/roleassignments?$expand=Member,RoleDefinitionBindings`);
+          lp = `<div class="perm-members" style="padding:4px 0 4px 6px;">${renderMembersTree(d.d?.results||[])}</div>`;
+        } catch {}
       }
-      html += `</div>`;
+      listNodes += treeNode('📋', esc(lst.Title), uTag, lp||'<div class="tree-loading">Keine eigenen Berechtigungen</div>');
     }
 
-    $id('perm-container').innerHTML = html;
-    $id('perm-status').innerHTML = '✓ Stufe 1+2 geladen. <span class="perm-spinner"></span> Ordner-Berechtigungen laden…';
+    // Subsite nodes
+    let subNodes = subsites.map(s => {
+      const uTag = s.HasUniqueRoleAssignments
+        ? '<span class="tree-badge" style="background:var(--red-bg);color:var(--red);">⚠ Eigene</span>'
+        : '<span class="tree-badge" style="background:var(--green-bg);color:var(--green);">✓ Vererbt</span>';
+      return treeNode('🌐', esc(s.Title), uTag, `<div class="tree-loading" style="font-size:10px;">${esc(s.Url)}</div>`);
+    }).join('');
 
-    // ── STUFE 3+4: Folder permissions (background) ──
-    await loadFolderPerms();
+    // Assemble tree
+    const tree = `<div class="tree">
+      ${treeNode('🌐', `<strong>${esc(siteName)}</strong> <span style="font-size:10px;color:var(--text-muted);">(Site)</span>`,
+        '<span class="tree-badge" style="background:var(--navy);color:#fff;">Stufe 1</span>',
+        siteMembers +
+        treeNode('📚', `Bibliotheken (${libs.length})`, '<span class="tree-badge" style="background:var(--navy2);color:#fff;">Stufe 2</span>', libNodes, 'tree_libs') +
+        (otherLists.length ? treeNode('📋', `Listen (${otherLists.length})`, '<span class="tree-badge" style="background:var(--navy2);color:#fff;">Stufe 2</span>', listNodes, 'tree_lists') : '') +
+        (subsites.length ? treeNode('🌐', `Unterseiten (${subsites.length})`, '<span class="tree-badge" style="background:var(--navy2);color:#fff;">Stufe 2</span>', subNodes, 'tree_subs') : ''),
+        'tree_root'
+      )}
+    </div>`;
+
+    $id('perm-container').innerHTML = tree;
+    // Auto-expand root
+    toggleTree('tree_root');
+
+    $id('perm-status').innerHTML = '✓ Stufe 1+2 geladen. <span class="perm-spinner"></span> Ordner laden (Stufe 3+4)…';
+    await loadFolderPermsTree();
 
   } catch(e) {
     dbg('Perm FEHLER', e.message);
@@ -1760,92 +2056,81 @@ async function startPermScan() {
     $id('perm-status').textContent = 'Fehler: ' + e.message;
   }
   $id('perm-scan-btn').disabled = false;
+  // Keep permSiteId and permSiteUrl for folder loading
 }
 
-async function loadFolderPerms() {
+async function loadFolderPermsTree() {
   for (const lib of permLibraries) {
-    const containerId = 'perm-lib-' + lib.Id.replace(/-/g,'');
+    const containerId = 'lib_'+lib.Id.replace(/-/g,'');
     const container = $id(containerId);
     if (!container) continue;
     try {
-      // Get drive for this library
-      dbg(`Stufe 3: Lade Ordner für "${lib.Title}"…`);
       const drivesData = await gGet(`/sites/${permSiteId}/lists/${lib.Id}/drive`);
       const driveId = drivesData.id;
-      const rootChildren = await gGet(`/sites/${permSiteId}/drives/${driveId}/root/children?$top=200`);
+      const rootChildren = await gGet(`/drives/${driveId}/root/children?$top=200`);
       const folders = (rootChildren.value||[]).filter(f=>f.folder);
+      if (!folders.length) { container.innerHTML='<div class="tree-loading">Keine Ordner</div>'; continue; }
 
-      if (!folders.length) {
-        container.innerHTML = '<span style="font-size:10px;color:var(--text-muted);">Keine Ordner</span>';
-        continue;
-      }
-
-      let fHtml = `<div style="font-size:10px;font-weight:700;color:var(--navy);margin-bottom:6px;">📂 Stufe 3 — Ordner (1. Ebene):</div>`;
+      let html = '';
       for (const folder of folders) {
-        // Check unique permissions via SP REST
-        let uniqueInfo = '';
+        let uTag='', permsHtml='';
         try {
           const relUrl = new URL(folder.webUrl).pathname;
-          const folderPerms = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(relUrl)}')/ListItemAllFields?$select=HasUniqueRoleAssignments`);
-          const hasUnique = folderPerms.d?.HasUniqueRoleAssignments;
-          if (hasUnique) {
-            uniqueInfo = '<span class="perm-unique">⚠ Eigene</span>';
-            // Load specific permissions
+          const fp = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(relUrl)}')/ListItemAllFields?$select=HasUniqueRoleAssignments`);
+          if (fp.d?.HasUniqueRoleAssignments) {
+            uTag='<span class="tree-badge" style="background:var(--red-bg);color:var(--red);">⚠ Eigene</span>';
             try {
-              const raData = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(relUrl)}')/ListItemAllFields/roleassignments?$expand=Member,RoleDefinitionBindings`);
-              uniqueInfo += `<div class="perm-sub" style="margin-top:4px;">${renderMembers(raData.d?.results||[])}</div>`;
-            } catch(e2) {}
-          } else {
-            uniqueInfo = '<span class="perm-inherit">✓ Vererbt</span>';
-          }
-        } catch(e) { uniqueInfo = '<span style="font-size:10px;color:var(--text-muted);">—</span>'; }
+              const ra = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(relUrl)}')/ListItemAllFields/roleassignments?$expand=Member,RoleDefinitionBindings`);
+              permsHtml=`<div class="perm-members" style="padding:2px 0 2px 6px;">${renderMembersTree(ra.d?.results||[])}</div>`;
+            } catch{}
+          } else { uTag='<span class="tree-badge" style="background:var(--green-bg);color:var(--green);">✓ Vererbt</span>'; }
+        } catch { uTag=''; }
 
-        // Stufe 4: Sub-folders
-        let subFolderHtml = '';
+        // Stufe 4: sub-folders
+        let subHtml = '';
         try {
-          const subChildren = await gGet(`/sites/${permSiteId}/drives/${driveId}/items/${folder.id}/children?$top=100`);
-          const subFolders = (subChildren.value||[]).filter(f=>f.folder);
-          if (subFolders.length) {
-            subFolderHtml = `<div class="perm-sub" style="margin-top:6px;"><div style="font-size:9px;font-weight:700;color:var(--text-muted);margin-bottom:4px;">Stufe 4 — Unterordner:</div>`;
-            for (const sf of subFolders) {
-              let sfInfo = '';
-              try {
-                const sfRelUrl = new URL(sf.webUrl).pathname;
-                const sfP = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(sfRelUrl)}')/ListItemAllFields?$select=HasUniqueRoleAssignments`);
-                if (sfP.d?.HasUniqueRoleAssignments) {
-                  sfInfo = '<span class="perm-unique">⚠ Eigene</span>';
-                  try {
-                    const sfRA = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(sfRelUrl)}')/ListItemAllFields/roleassignments?$expand=Member,RoleDefinitionBindings`);
-                    sfInfo += `<div class="perm-sub" style="margin-top:2px;">${renderMembers(sfRA.d?.results||[])}</div>`;
-                  } catch {}
-                } else {
-                  sfInfo = '<span class="perm-inherit">✓ Vererbt</span>';
-                }
-              } catch { sfInfo = ''; }
-              subFolderHtml += `<div class="perm-folder" style="cursor:default;">📄 ${esc(sf.name)} ${sfInfo}</div>`;
-            }
-            subFolderHtml += '</div>';
+          const sub = await gGet(`/drives/${driveId}/items/${folder.id}/children?$top=100`);
+          const subF = (sub.value||[]).filter(f=>f.folder);
+          subHtml = subF.map(sf => {
+            // We'll load sub-perms lazily — just show the node
+            const sfId = 'sf_'+sf.id.replace(/[^a-zA-Z0-9]/g,'');
+            return treeNode('📄', esc(sf.name)+` <span style="font-size:10px;color:var(--text-muted);">(${sf.folder.childCount})</span>`,
+              `<span class="tree-badge" style="background:var(--bg);color:var(--text-dim);">Stufe 4</span>`,
+              `<div id="${sfId}" class="tree-loading"><span class="perm-spinner"></span> Prüfe…</div>`, sfId+'_w');
+            // Fire background check
+            setTimeout(()=>checkSubFolderPerm(sfId, sf.webUrl), 100);
+            return '';  // placeholder, will be replaced
+          }).join('');
+          // Actually build properly
+          subHtml = '';
+          for (const sf of subF) {
+            let sfTag='', sfPerms='';
+            try {
+              const sfRelUrl = new URL(sf.webUrl).pathname;
+              const sfP = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(sfRelUrl)}')/ListItemAllFields?$select=HasUniqueRoleAssignments`);
+              if (sfP.d?.HasUniqueRoleAssignments) {
+                sfTag='<span class="tree-badge" style="background:var(--red-bg);color:var(--red);">⚠ Eigene</span>';
+                try {
+                  const sfRA = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(sfRelUrl)}')/ListItemAllFields/roleassignments?$expand=Member,RoleDefinitionBindings`);
+                  sfPerms=`<div class="perm-members" style="padding:2px 0;">${renderMembersTree(sfRA.d?.results||[])}</div>`;
+                } catch{}
+              } else { sfTag='<span class="tree-badge" style="background:var(--green-bg);color:var(--green);">✓</span>'; }
+            } catch {}
+            subHtml += treeNode('📄', esc(sf.name), sfTag, sfPerms||'<div class="tree-loading">Vererbt</div>');
           }
-        } catch(e) { dbg('Stufe 4 Fehler', {folder: folder.name, err: e.message}); }
+        } catch {}
 
-        fHtml += `<div class="perm-card" style="padding:10px 12px;margin-bottom:6px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span>📂</span><span style="font-weight:600;font-size:12px;">${esc(folder.name)}</span>
-            <span style="font-size:10px;color:var(--text-muted);">(${folder.folder.childCount} Elemente)</span>
-            ${uniqueInfo.split('<div')[0]}
-          </div>
-          ${uniqueInfo.includes('<div')?uniqueInfo.substring(uniqueInfo.indexOf('<div')):''}
-          ${subFolderHtml}
-        </div>`;
+        const children = permsHtml + (subHtml?`<div style="font-size:9px;font-weight:700;color:var(--text-muted);padding:4px 0 2px 6px;">Stufe 4 — Unterordner:</div>`+subHtml:'');
+        html += treeNode('📂', `${esc(folder.name)} <span style="font-size:10px;color:var(--text-muted);">(${folder.folder.childCount})</span>`,
+          uTag||'', children||'<div class="tree-loading">—</div>');
       }
-      container.innerHTML = fHtml;
-      dbg(`Stufe 3+4 fertig: "${lib.Title}"`, {ordner: folders.length});
+      container.innerHTML = `<div style="font-size:9px;font-weight:700;color:var(--text-muted);padding:4px 0 2px;">Stufe 3 — Ordner (1. Ebene):</div>` + html;
+      dbg(`Stufe 3+4: "${lib.Title}" fertig`, {ordner: folders.length});
     } catch(e) {
-      dbg('Folder-Fehler', {lib: lib.Title, err: e.message});
-      if(container) container.innerHTML = `<span style="font-size:10px;color:var(--red);">${esc(e.message)}</span>`;
+      if(container) container.innerHTML=`<span style="font-size:10px;color:var(--red);">${esc(e.message)}</span>`;
     }
   }
-  $id('perm-status').textContent = `✓ Alle 4 Stufen geladen (${permLibraries.length} Bibliotheken geprüft)`;
+  $id('perm-status').textContent = `✓ Alle 4 Stufen geladen`;
   dbg('Berechtigungs-Scan komplett ✓');
 }
 
