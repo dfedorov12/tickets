@@ -212,6 +212,28 @@ header{
 .rpt-legend-dot{width:10px;height:10px;border-radius:3px;}
 .rpt-stacked-row{display:flex;height:28px;border-radius:6px;overflow:hidden;margin-bottom:4px;}
 .rpt-stacked-seg{height:100%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.3);min-width:1px;transition:width .6s ease;}
+
+/* FULLSCREEN TICKET */
+.fs-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:600;align-items:center;justify-content:center;}
+.fs-overlay.open{display:flex;}
+.fs-modal{background:#fff;border-radius:14px;width:90vw;max-width:960px;height:85vh;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,.25);overflow:hidden;}
+.fs-hdr{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:#fafbfc;}
+.fs-hdr-left{display:flex;align-items:center;gap:14px;}
+.fs-hdr-title{font-size:18px;font-weight:700;color:var(--navy);}
+.fs-status-current{display:inline-flex;align-items:center;padding:5px 14px;border-radius:10px;font-size:12px;font-weight:700;}
+.fs-body{flex:1;overflow:auto;padding:24px;display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.fs-body-full{grid-column:1/-1;}
+.fs-section{font-size:11px;font-weight:700;color:var(--navy);margin:0 0 10px;padding-bottom:5px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.04em;grid-column:1/-1;}
+.fs-field{display:flex;flex-direction:column;gap:3px;}
+.fs-field-label{font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;}
+.fs-field-val{font-size:13px;color:var(--text);padding:6px 0;min-height:24px;}
+.fs-desc-box{padding:12px 14px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;line-height:1.7;background:var(--bg);word-break:break-word;}
+.fs-desc-box ul,.fs-desc-box ol{margin:6px 0 6px 18px;padding:0;}
+.fs-desc-box li{margin-bottom:3px;}
+.fs-desc-box p{margin:4px 0;}
+.fs-desc-box a{color:var(--blue);word-break:break-all;}
+.fs-footer{padding:14px 24px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0;align-items:center;}
+.fs-status-changer{display:flex;gap:6px;margin-left:auto;}
 </style>
 </head>
 <body>
@@ -367,6 +389,25 @@ header{
 
 <div id="toast-c"></div>
 
+<!-- FULLSCREEN TICKET MODAL -->
+<div class="fs-overlay" id="fs-overlay" onclick="if(event.target===this)closeFullscreen();">
+  <div class="fs-modal">
+    <div class="fs-hdr">
+      <div class="fs-hdr-left">
+        <div class="fs-hdr-title" id="fs-title">Ticket</div>
+        <div id="fs-status-badge"></div>
+      </div>
+      <button class="modal-close" onclick="closeFullscreen()" style="font-size:22px;">✕</button>
+    </div>
+    <div class="fs-body" id="fs-body"></div>
+    <div class="fs-footer">
+      <button class="btn btn-primary" id="fs-save" onclick="saveFullscreen()">✓ Speichern</button>
+      <button class="btn btn-danger" id="fs-delete">🗑 Löschen</button>
+      <div class="fs-status-changer" id="fs-status-changer"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ════════════════════════════════════════════════════════════════
 // CONFIG
@@ -423,8 +464,13 @@ function personName(v) {
 function cleanHtml(v) {
   if (!v) return '';
   let s = String(v);
-  // Not HTML? Just return escaped with line breaks
-  if (!/<[a-z][\s\S]*>/i.test(s)) return esc(s).replace(/\n/g,'<br>');
+  // Not HTML? Auto-link URLs and return escaped with line breaks
+  if (!/<[a-z][\s\S]*>/i.test(s)) {
+    let escaped = esc(s);
+    // Auto-link URLs
+    escaped = escaped.replace(/(https?:\/\/[^\s<"']+)/g, '<a href="$1" target="_blank" style="color:var(--blue);word-break:break-all;">$1</a>');
+    return escaped.replace(/\n/g,'<br>');
+  }
   // Parse and extract inner content
   const tmp = document.createElement('div');
   tmp.innerHTML = s;
@@ -432,18 +478,41 @@ function cleanHtml(v) {
   tmp.querySelectorAll('div[class^="ExternalClass"]').forEach(el => {
     el.replaceWith(...el.childNodes);
   });
-  // Strip inline styles but keep structure (ul, li, p, br, b, strong, em, a)
+  // Process all elements
   const allowed = new Set(['UL','OL','LI','P','BR','B','STRONG','EM','I','A','H1','H2','H3','H4','SPAN']);
   tmp.querySelectorAll('*').forEach(el => {
     el.removeAttribute('style');
     el.removeAttribute('class');
-    if (!allowed.has(el.tagName)) {
-      // Replace unknown tags with their content
+    // Keep href on <a> tags, add target=_blank
+    if (el.tagName === 'A') {
+      const href = el.getAttribute('href');
+      // Clear all attributes then re-add href
+      [...el.attributes].forEach(a=>el.removeAttribute(a.name));
+      if (href) {
+        el.setAttribute('href', href);
+        el.setAttribute('target', '_blank');
+        el.style.color = 'var(--blue)';
+        el.style.wordBreak = 'break-all';
+      }
+    } else if (!allowed.has(el.tagName)) {
       if (el.tagName === 'DIV') {
         const p = document.createElement('p');
         p.innerHTML = el.innerHTML;
         el.replaceWith(p);
       }
+    }
+  });
+  // Auto-link plain URLs in text nodes
+  const walker = document.createTreeWalker(tmp, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+  textNodes.forEach(tn => {
+    if (tn.parentElement?.tagName === 'A') return; // already a link
+    const urlRe = /(https?:\/\/[^\s<"']+)/g;
+    if (urlRe.test(tn.textContent)) {
+      const span = document.createElement('span');
+      span.innerHTML = tn.textContent.replace(urlRe, '<a href="$1" target="_blank" style="color:var(--blue);word-break:break-all;">$1</a>');
+      tn.replaceWith(span);
     }
   });
   const clean = tmp.innerHTML.trim();
@@ -945,9 +1014,11 @@ function openTicketDetail(id) {
   const stColors  = {Offen:'var(--blue)',  'In Bearbeitung':'var(--yellow)',  Erledigt:'var(--green)',  Abgebrochen:'#6b7280'};
 
   let html = `<div class="section-title">Status</div>
-    <div class="status-changer">
-      ${statuses.map(s=>`<button class="status-btn${s===curStatus?' active':''}"
-        style="color:${stColors[s]||'#666'};background:${s===curStatus?stColors[s]+'22':'var(--bg)'};"
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span class="st-badge" style="font-size:12px;padding:5px 14px;background:${stColors[curStatus]||'#666'}22;color:${stColors[curStatus]||'#666'};">${esc(curStatus)}</span>
+      <span style="font-size:10px;color:var(--text-muted);margin:0 2px;">→</span>
+      ${statuses.filter(s=>s!==curStatus).map(s=>`<button class="status-btn"
+        style="color:${stColors[s]||'#666'};background:var(--bg);font-size:11px;"
         onclick="changeStatus('${id}','${s}')">${s}</button>`).join('')}
     </div>`;
 
@@ -1020,6 +1091,7 @@ function openTicketDetail(id) {
   $id('sb-body').innerHTML = html;
   $id('sb-actions').innerHTML = `
     <button class="btn btn-primary" onclick="saveSidebar('${id}')" style="flex:1;">✓ Speichern</button>
+    <button class="btn btn-ghost" onclick="openTicketFullscreen('${id}')">⛶ Vollbild</button>
     <button class="btn btn-ghost"   onclick="closeSidebar()">Schließen</button>
     <button class="btn btn-danger"  onclick="confirmDeleteTicket('${id}')">🗑</button>`;
 
@@ -1063,6 +1135,145 @@ async function fetchTicketAttachments(id) {
 }
 
 function closeSidebar() { $id('tkt-sidebar').classList.remove('open'); editingId=null; }
+
+let fullscreenId = null;
+
+function openTicketFullscreen(id) {
+  const it = allTickets.find(t=>t.id==id);
+  if (!it) return;
+  fullscreenId = id;
+  closeSidebar();
+  const f = it.fields||{};
+  const colStatus = col(['Status'])||'Status';
+  const curStatus = f[colStatus]||f.Status||'Offen';
+  const statuses  = ['Offen','In Bearbeitung','Erledigt','Abgebrochen'];
+  const stColors  = {Offen:'var(--blue)','In Bearbeitung':'var(--yellow)',Erledigt:'var(--green)',Abgebrochen:'#6b7280'};
+
+  $id('fs-title').textContent = `Ticket #${id}`;
+  $id('fs-status-badge').innerHTML = `<span class="fs-status-current" style="background:${stColors[curStatus]||'#666'}22;color:${stColors[curStatus]||'#666'};">${esc(curStatus)}</span>`;
+  $id('fs-delete').onclick = ()=>{ closeFullscreen(); confirmDeleteTicket(id); };
+
+  // Status changer in footer
+  $id('fs-status-changer').innerHTML = `<span style="font-size:10px;color:var(--text-muted);margin-right:4px;">Status ändern:</span>` +
+    statuses.filter(s=>s!==curStatus).map(s=>`<button class="status-btn" style="color:${stColors[s]||'#666'};background:var(--bg);font-size:11px;" onclick="changeStatusFs('${id}','${s}')">${s}</button>`).join('');
+
+  // Skip fields
+  const skip = new Set([
+    '_UIVersionString','ContentType','Attachments','Modified','Created','Author','Editor','ID',
+    'AuthorLookupId','EditorLookupId','AppAuthorLookupId',
+    'LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount',
+    '@odata.etag','id','OData__ColorTag','ComplianceAssetId'
+  ]);
+  const descCol = getCol('desc');
+  const assignedCol = getCol('assigned');
+  const authorCol = col(['Author0','Ticket_x0020_erstellt_x0020_von','TicketErstelltVon','ErstelltVon']);
+
+  let html = '<div class="fs-section">Details</div>';
+
+  Object.entries(f).forEach(([k,v])=>{
+    if(skip.has(k)||k.startsWith('_')||k.startsWith('@odata')) return;
+    if(k===colStatus) return;
+    if(v===null||v===undefined||v==='') return;
+    const label = ticketCols[k]||k;
+
+    // Description / rich text
+    if(k===descCol || isRichText(v)) {
+      const rendered = cleanHtml(v);
+      html+=`<div class="fs-field fs-body-full"><div class="fs-field-label">${esc(label)}</div>
+        <div class="fs-desc-box">${rendered}</div>
+        <textarea data-fk="${esc(k)}" style="font-size:12px;margin-top:6px;display:none;width:100%;min-height:80px;padding:8px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;" rows="4">${esc(String(v||''))}</textarea>
+        <button onclick="this.previousElementSibling.style.display='';this.previousElementSibling.previousElementSibling.style.display='none';this.style.display='none';" style="font-size:10px;color:var(--blue);background:none;border:none;cursor:pointer;margin-top:4px;">✏️ Bearbeiten</button>
+      </div>`;
+      return;
+    }
+
+    // Person fields
+    const isPersonJson = typeof v === 'string' && v.startsWith('[') && /LookupValue|Email/.test(v);
+    const isPersonObj = Array.isArray(v) && v.length && (v[0].LookupValue || v[0].Email);
+    if(k===assignedCol || k===authorCol || isPersonJson || isPersonObj) {
+      html+=`<div class="fs-field"><div class="fs-field-label">${esc(label)}</div>
+        <div class="fs-field-val">${esc(personName(v))}</div></div>`;
+      return;
+    }
+
+    // Regular
+    let valStr;
+    if (typeof v === 'object') {
+      valStr = v?.LookupValue || v?.displayName || v?.Title || v?.Email || '';
+      if (!valStr) try { valStr = JSON.stringify(v); } catch { valStr = ''; }
+    } else { valStr = String(v); }
+    html+=`<div class="fs-field"><div class="fs-field-label">${esc(label)}</div>
+      <input data-fk="${esc(k)}" value="${esc(valStr)}" style="width:100%;padding:6px 10px;border:1.5px solid var(--border2);border-radius:6px;font-size:13px;font-family:inherit;"/></div>`;
+  });
+
+  // Attachments
+  html+=`<div class="fs-section">Anhänge</div>
+    <div class="fs-body-full" id="fs-atts-${id}" style="display:flex;flex-wrap:wrap;gap:6px;min-height:30px;">
+      <span style="font-size:11px;color:var(--text-muted);">Lade…</span></div>
+    <div class="fs-body-full">
+      <label class="attach-pill" style="cursor:pointer;">＋ Datei(en) wählen
+        <input type="file" multiple style="display:none;" onchange="uploadAttachments(this.files,'${id}')"/>
+      </label>
+      <span style="font-size:10px;color:var(--text-muted);margin-left:8px;">Erstellt: ${fmtFull(it.createdDateTime)}</span>
+    </div>`;
+
+  $id('fs-body').innerHTML = html;
+  $id('fs-overlay').classList.add('open');
+  fetchTicketAttachmentsFs(id);
+}
+
+function closeFullscreen() { $id('fs-overlay').classList.remove('open'); fullscreenId=null; }
+
+async function changeStatusFs(id, newStatus) {
+  if (!ticketSiteId||!ticketListId) return;
+  const colStatus=col(['Status'])||'Status';
+  try {
+    await gPatch(`/sites/${ticketSiteId}/lists/${ticketListId}/items/${id}/fields`, {[colStatus]:newStatus});
+    const it = allTickets.find(t=>t.id==id);
+    if(it) it.fields[colStatus]=newStatus;
+    toast(`Status → ${newStatus}`,'success');
+    renderTickets(allTickets.slice(0, displayedCount));
+    openTicketFullscreen(id); // refresh
+  } catch(e){ toast('Fehler: '+e.message,'error'); }
+}
+
+async function saveFullscreen() {
+  if (!fullscreenId) return;
+  const fields={};
+  $id('fs-body').querySelectorAll('[data-fk]').forEach(el=>{ if(el.value) fields[el.dataset.fk]=el.value; });
+  try {
+    await gPatch(`/sites/${ticketSiteId}/lists/${ticketListId}/items/${fullscreenId}/fields`, fields);
+    const it=allTickets.find(t=>t.id==fullscreenId);
+    if(it) Object.assign(it.fields, fields);
+    toast('Gespeichert ✓','success');
+    renderTickets(allTickets.slice(0, displayedCount));
+  } catch(e){ toast('Fehler: '+e.message,'error'); }
+}
+
+async function fetchTicketAttachmentsFs(id) {
+  const container = document.getElementById('fs-atts-'+id);
+  if (!container) return;
+  try {
+    const spTok = await getSpToken();
+    const r = await fetch(
+      `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/items(${id})/AttachmentFiles`,
+      {headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=verbose'}}
+    );
+    const j = await r.json();
+    const files = j?.d?.results||j?.value||[];
+    container.innerHTML = '';
+    if (!files.length) { container.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">Keine Anhänge</span>'; return; }
+    files.forEach(a=>{
+      const url = a.ServerRelativeUrl
+        ? 'https://dihag.sharepoint.com'+a.ServerRelativeUrl
+        : (a.AbsoluteUri||'#');
+      const link = document.createElement('a');
+      link.href=url; link.target='_blank'; link.className='attach-pill';
+      link.textContent='📎 '+(a.FileName||'Anhang');
+      container.appendChild(link);
+    });
+  } catch(e) { if(container) container.innerHTML='<span style="font-size:11px;color:var(--red);">'+esc(e.message)+'</span>'; }
+}
 
 async function changeStatus(id, newStatus) {
   if (!ticketSiteId||!ticketListId) return;
@@ -1284,15 +1495,6 @@ function buildReports() {
     </div>`;
   }
 
-  // Kategorie chart
-  if (cKat) {
-    const katData = countBy(allTickets, t=>(t.fields||{})[cKat]||'');
-    html += `<div class="rpt-card">
-      <div class="rpt-title">📂 Tickets nach Kategorie</div>
-      ${barChart(katData, ()=>'var(--blue)')}
-    </div>`;
-  }
-
   // Werk × Status stacked
   if (cWerk) {
     const werke = [...new Set(allTickets.map(t=>(t.fields||{})[cWerk]||'(leer)'))].sort();
@@ -1332,6 +1534,15 @@ function buildReports() {
     <div class="rpt-title">📅 Tickets pro Monat (letzte 12 Monate)</div>
     ${barChart(timeData, ()=>'var(--navy)')}
   </div>`;
+
+  // Kategorie chart (ganz unten)
+  if (cKat) {
+    const katData = countBy(allTickets, t=>(t.fields||{})[cKat]||'');
+    html += `<div class="rpt-card rpt-card-full">
+      <div class="rpt-title">📂 Tickets nach Kategorie</div>
+      ${barChart(katData, ()=>'var(--blue)')}
+    </div>`;
+  }
 
   html += '</div>';
 
@@ -1429,12 +1640,40 @@ Notizen: ${d.notizen||'-'}`.trim();
           {value:'intern',label:'Nur Intern (Deutsch)'},
           {value:'extern',label:'Nur Extern (Englisch)'},
         ]},
+        {key:'vorlage_intern',label:'Vorlage (Intern)',type:'select',def:'urlaub',options:[
+          {value:'urlaub',label:'🏖️ Urlaub'},
+          {value:'urlaub_keine_weiterleitung',label:'🏖️ Urlaub (keine Weiterleitung)'},
+          {value:'krank',label:'🤒 Krankheit (mit Verständnis)'},
+          {value:'krank2',label:'🤒 Krankheit (sachlich)'},
+          {value:'abwesend',label:'📋 Allgemein abwesend'},
+          {value:'kurz',label:'✉️ Kurz & knapp'},
+          {value:'custom',label:'✏️ Benutzerdefiniert'},
+        ]},
         {key:'intern',label:'Interne Nachricht (Deutsch)',type:'textarea',rows:4,
-          def:'Vielen Dank für Ihre Nachricht. Ich bin vom {{von}} bis {{bis}} abwesend.\nBei dringenden Angelegenheiten wenden Sie sich bitte an {{vertreter}} ({{vertr_mail}}).'},
+          def:'Vielen Dank für Ihre Nachricht. Ich bin derzeit im Urlaub und habe keinen Zugriff auf meine E-Mails.\nBei dringenden Angelegenheiten wenden Sie sich bitte an {{vertreter}} ({{vertr_mail}}).\nIch melde mich nach meiner Rückkehr am {{bis}} bei Ihnen.'},
+        {key:'vorlage_extern',label:'Vorlage (Extern)',type:'select',def:'urlaub_en',options:[
+          {value:'urlaub_en',label:'🏖️ Holiday (English)'},
+          {value:'general_en',label:'📋 General (English)'},
+          {value:'custom_en',label:'✏️ Custom'},
+        ]},
         {key:'extern',label:'Externe Nachricht (Englisch)',type:'textarea',rows:4,
-          def:'Thank you for your email. I am out of office from {{von}} to {{bis}}.\nFor urgent matters please contact {{vertreter}} ({{vertr_mail}}).'},
+          def:'Thank you for your email. I am currently out of office from {{von}} to {{bis}}.\nFor urgent matters please contact {{vertreter}} ({{vertr_mail}}).\nI will reply to your message upon my return.'},
       ]},
     ],
+    _vorlagen_intern:{
+      urlaub:'Vielen Dank für Ihre Nachricht. Ich bin derzeit im Urlaub und habe keinen Zugriff auf meine E-Mails.\nBei dringenden Angelegenheiten wenden Sie sich bitte an {{vertreter}} ({{vertr_mail}}).\nIch melde mich nach meiner Rückkehr am {{bis}} bei Ihnen.',
+      urlaub_keine_weiterleitung:'Ich bin bis auf Weiteres nicht im Büro. Ihre E-Mail wird nicht weitergeleitet.\nIch bin ab dem {{bis}} wieder für Sie da.',
+      krank:'Aufgrund von Krankheit bin ich vorübergehend nicht erreichbar.\nBei dringenden Angelegenheiten wenden Sie sich bitte an {{vertreter}} ({{vertr_mail}}).\nVielen Dank für Ihr Verständnis.',
+      krank2:'Ich bin derzeit erkrankt und nicht im Büro.\nIch bearbeite Ihre Nachricht, sobald ich zurück bin.\nBei dringenden Anliegen wenden Sie sich bitte an {{vertreter}} ({{vertr_mail}}).',
+      abwesend:'Ich bin vorübergehend nicht verfügbar.\nBei dringenden Angelegenheiten wenden Sie sich bitte an {{vertreter}} ({{vertr_mail}}).\nIch melde mich schnellstmöglich nach meiner Rückkehr.',
+      kurz:'Vielen Dank für Ihre E-Mail. Ich bin derzeit abwesend und ab dem {{bis}} wieder erreichbar.\nVertretung: {{vertreter}} ({{vertr_mail}}).',
+      custom:'',
+    },
+    _vorlagen_extern:{
+      urlaub_en:'Thank you for your email. I am currently out of office from {{von}} to {{bis}}.\nFor urgent matters please contact {{vertreter}} ({{vertr_mail}}).\nI will reply to your message upon my return.',
+      general_en:'Thank you for your message. I am currently unavailable.\nFor urgent enquiries please contact {{vertreter}} ({{vertr_mail}}).\nI will respond as soon as possible after my return on {{bis}}.',
+      custom_en:'',
+    },
     submit:'📅 Nachricht erstellen & kopieren',
     onSubmit: async d=>{
       const fill=s=>s.replace(/\{\{von\}\}/g,d.von).replace(/\{\{bis\}\}/g,d.bis)
@@ -1505,6 +1744,28 @@ function openAutoForm(key){
     });
   });
   $id('auto-modal').classList.add('open');
+
+  // Vorlage change handlers for Abwesenheitsnotiz
+  if (key === 'abwesenheit') {
+    const vorlageIntern = body.querySelector('[data-key="vorlage_intern"]');
+    const vorlageExtern = body.querySelector('[data-key="vorlage_extern"]');
+    const internTA = body.querySelector('[data-key="intern"]');
+    const externTA = body.querySelector('[data-key="extern"]');
+    if (vorlageIntern && internTA) {
+      vorlageIntern.addEventListener('change', () => {
+        const tmpl = form._vorlagen_intern?.[vorlageIntern.value];
+        if (tmpl !== undefined) internTA.value = tmpl;
+        internTA.focus();
+      });
+    }
+    if (vorlageExtern && externTA) {
+      vorlageExtern.addEventListener('change', () => {
+        const tmpl = form._vorlagen_extern?.[vorlageExtern.value];
+        if (tmpl !== undefined) externTA.value = tmpl;
+        externTA.focus();
+      });
+    }
+  }
 }
 
 function closeAutoModal(){$id('auto-modal').classList.remove('open'); currentAutoKey=null;}
