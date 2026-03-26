@@ -185,6 +185,33 @@ header{
 .toast.out{animation:fadeOut .22s ease forwards;}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes fadeOut{to{opacity:0;transform:translateY(8px)}}
+
+/* DESCRIPTION BOX */
+.desc-box ul,.desc-box ol{margin:6px 0 6px 18px;padding:0;}
+.desc-box li{margin-bottom:3px;}
+.desc-box p{margin:4px 0;}
+
+/* REPORTS */
+.rpt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:20px;}
+.rpt-card{background:#fff;border:1.5px solid var(--border);border-radius:12px;padding:20px;overflow:hidden;}
+.rpt-card-full{grid-column:1/-1;}
+.rpt-title{font-size:14px;font-weight:700;color:var(--navy);margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+.rpt-bar-chart{display:flex;flex-direction:column;gap:8px;}
+.rpt-bar-row{display:flex;align-items:center;gap:10px;}
+.rpt-bar-label{min-width:120px;font-size:11px;font-weight:600;color:var(--text);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rpt-bar-track{flex:1;height:26px;background:var(--bg);border-radius:6px;overflow:hidden;position:relative;}
+.rpt-bar-fill{height:100%;border-radius:6px;transition:width .6s ease;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;min-width:28px;}
+.rpt-bar-val{font-size:10px;font-weight:700;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.3);}
+.rpt-bar-val-out{font-size:10px;font-weight:700;color:var(--text);margin-left:6px;}
+.rpt-kpi-row{display:flex;gap:16px;flex-wrap:wrap;}
+.rpt-kpi{flex:1;min-width:120px;text-align:center;padding:16px 12px;background:var(--bg);border-radius:10px;}
+.rpt-kpi-num{font-size:28px;font-weight:700;color:var(--navy);}
+.rpt-kpi-label{font-size:11px;color:var(--text-dim);margin-top:4px;font-weight:600;}
+.rpt-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;}
+.rpt-legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-dim);}
+.rpt-legend-dot{width:10px;height:10px;border-radius:3px;}
+.rpt-stacked-row{display:flex;height:28px;border-radius:6px;overflow:hidden;margin-bottom:4px;}
+.rpt-stacked-seg{height:100%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.3);min-width:1px;transition:width .6s ease;}
 </style>
 </head>
 <body>
@@ -208,6 +235,7 @@ header{
     <div class="hdr-divider"></div>
     <nav class="hdr-nav">
       <button class="hdr-tab on" id="tab-tickets" onclick="showPanel('tickets')">🎫 Tickets</button>
+      <button class="hdr-tab"    id="tab-reports" onclick="showPanel('reports')">📊 Reports</button>
       <button class="hdr-tab"    id="tab-auto"    onclick="showPanel('auto')">⚡ Automatismen</button>
     </nav>
     <div class="hdr-right">
@@ -276,6 +304,23 @@ header{
           <div class="tkt-sidebar-body" id="sb-body"></div>
           <div class="sidebar-actions" id="sb-actions"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- REPORTS PANEL -->
+    <div class="panel" id="panel-reports" style="overflow:auto;">
+      <div style="padding:20px 24px 12px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div style="font-size:17px;font-weight:700;color:var(--navy);">📊 Reports & Auswertungen</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:3px;">Ticket-Statistiken nach Werk, Status, Priorität und Zeitverlauf</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="rpt-info" style="font-size:11px;color:var(--text-muted);"></span>
+          <button class="btn btn-ghost" onclick="buildReports()" style="font-size:11px;">🔄 Aktualisieren</button>
+        </div>
+      </div>
+      <div style="padding:24px;display:flex;flex-direction:column;gap:24px;" id="reports-container">
+        <div class="empty" id="rpt-empty">Daten werden geladen…</div>
       </div>
     </div>
 
@@ -358,6 +403,10 @@ const fmtFull = s => s ? new Date(s).toLocaleString('de-DE',{day:'2-digit',month
 // Extract display name from email or person field
 function personName(v) {
   if (!v) return '';
+  // Handle JSON string arrays: '[{"LookupId":23,"LookupValue":"Marco Maukisch",...}]'
+  if (typeof v === 'string' && v.startsWith('[')) {
+    try { return personName(JSON.parse(v)); } catch {}
+  }
   if (Array.isArray(v)) return v.map(x=>personName(x)).filter(Boolean).join(', ');
   if (typeof v === 'object') {
     if (v.LookupValue) return v.LookupValue;
@@ -368,6 +417,43 @@ function personName(v) {
   const s = String(v);
   if (s.includes('@')) return s.split('@')[0].replace(/\./g,' ').replace(/\b\w/g,c=>c.toUpperCase());
   return s;
+}
+
+// Clean SP ExternalClass HTML → readable HTML
+function cleanHtml(v) {
+  if (!v) return '';
+  let s = String(v);
+  // Not HTML? Just return escaped with line breaks
+  if (!/<[a-z][\s\S]*>/i.test(s)) return esc(s).replace(/\n/g,'<br>');
+  // Parse and extract inner content
+  const tmp = document.createElement('div');
+  tmp.innerHTML = s;
+  // Remove ExternalClass wrapper divs (keep their content)
+  tmp.querySelectorAll('div[class^="ExternalClass"]').forEach(el => {
+    el.replaceWith(...el.childNodes);
+  });
+  // Strip inline styles but keep structure (ul, li, p, br, b, strong, em, a)
+  const allowed = new Set(['UL','OL','LI','P','BR','B','STRONG','EM','I','A','H1','H2','H3','H4','SPAN']);
+  tmp.querySelectorAll('*').forEach(el => {
+    el.removeAttribute('style');
+    el.removeAttribute('class');
+    if (!allowed.has(el.tagName)) {
+      // Replace unknown tags with their content
+      if (el.tagName === 'DIV') {
+        const p = document.createElement('p');
+        p.innerHTML = el.innerHTML;
+        el.replaceWith(p);
+      }
+    }
+  });
+  const clean = tmp.innerHTML.trim();
+  return clean || esc(s).replace(/\n/g,'<br>');
+}
+
+// Detect if a value looks like HTML or rich text from SP
+function isRichText(v) {
+  if (!v || typeof v !== 'string') return false;
+  return /<div[\s>]|<p[\s>]|<ul[\s>]|<br\s*\/?>|ExternalClass/i.test(v);
 }
 
 function toast(msg,type='info'){
@@ -512,12 +598,13 @@ function clearDebug() {
 // PANEL SWITCHING
 // ════════════════════════════════════════════════════════════════
 function showPanel(id) {
-  ['tickets','auto'].forEach(p => {
+  ['tickets','reports','auto'].forEach(p => {
     $id('panel-'+p).classList.toggle('active', p===id);
     $id('tab-'+p).classList.toggle('on', p===id);
   });
   $id('btn-new').style.display = id==='tickets' ? '' : 'none';
   $id('btn-refresh').style.display = id==='tickets' ? '' : 'none';
+  if (id==='reports' && allTickets.length) buildReports();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -881,29 +968,38 @@ function openTicketDetail(id) {
   Object.entries(f).forEach(([k,v])=>{
     if(skip.has(k)||k.startsWith('_')||k.startsWith('@odata')) return;
     if(k===colStatus) return; // already shown
+    if(v===null||v===undefined||v==='') return; // skip empty
     const label = ticketCols[k]||k;
 
-    // Description → formatted box
-    if(k===descCol && v) {
-      const descHtml = esc(String(v||'')).replace(/\n/g,'<br>');
+    // Description or any rich text HTML field → clean and formatted
+    if(k===descCol || isRichText(v)) {
+      const rendered = cleanHtml(v);
       html+=`<div class="field-row"><label>${esc(label)}</label>
-        <div style="padding:10px 12px;border:1.5px solid var(--border2);border-radius:6px;font-size:12px;line-height:1.7;background:var(--bg);min-height:60px;white-space:pre-wrap;word-break:break-word;">${descHtml}</div>
+        <div class="desc-box" style="padding:10px 12px;border:1.5px solid var(--border2);border-radius:6px;font-size:12px;line-height:1.7;background:var(--bg);min-height:40px;word-break:break-word;">${rendered}</div>
         <textarea data-fk="${esc(k)}" style="font-size:12px;margin-top:6px;display:none;" rows="4">${esc(String(v||''))}</textarea>
         <button onclick="this.previousElementSibling.style.display='';this.previousElementSibling.previousElementSibling.style.display='none';this.style.display='none';" style="font-size:10px;color:var(--blue);background:none;border:none;cursor:pointer;margin-top:4px;">✏️ Bearbeiten</button>
       </div>`;
       return;
     }
 
-    // Person fields → show name not email
-    if(k===assignedCol || k===authorCol) {
+    // Person fields (known columns or JSON arrays with LookupValue/Email)
+    const isPersonJson = typeof v === 'string' && v.startsWith('[') && /LookupValue|Email/.test(v);
+    const isPersonObj = Array.isArray(v) && v.length && (v[0].LookupValue || v[0].Email);
+    if(k===assignedCol || k===authorCol || isPersonJson || isPersonObj) {
       const nameStr = personName(v);
       html+=`<div class="field-row"><label>${esc(label)}</label>
-        <input data-fk="${esc(k)}" value="${esc(nameStr)}" style="font-size:12px;" readonly tabindex="-1" style="font-size:12px;background:var(--bg);cursor:default;"/></div>`;
+        <input value="${esc(nameStr)}" style="font-size:12px;background:var(--bg);cursor:default;" readonly tabindex="-1"/></div>`;
       return;
     }
 
     // Regular fields
-    const valStr = typeof v==='object'?(v?.LookupValue||v?.displayName||JSON.stringify(v)):String(v||'');
+    let valStr;
+    if (typeof v === 'object') {
+      valStr = v?.LookupValue || v?.displayName || v?.Title || v?.Email || '';
+      if (!valStr) try { valStr = JSON.stringify(v); } catch { valStr = ''; }
+    } else {
+      valStr = String(v);
+    }
     html+=`<div class="field-row"><label>${esc(label)}</label>
       <input data-fk="${esc(k)}" value="${esc(valStr)}" style="font-size:12px;"/></div>`;
   });
@@ -1069,6 +1165,179 @@ async function saveTicket() {
     closeTicketModal();
     await streamTickets();
   } catch(e){ toast('Fehler: '+e.message,'error'); }
+}
+
+// ════════════════════════════════════════════════════════════════
+// REPORTS
+// ════════════════════════════════════════════════════════════════
+const STATUS_COLORS = {
+  'Offen':'var(--blue)','Neu':'#6366f1',
+  'In Bearbeitung':'var(--yellow)','Erledigt':'var(--green)',
+  'Abgebrochen':'#6b7280'
+};
+const PRIO_COLORS = {
+  'Niedrig':'#94a3b8','Normal':'var(--blue)','Mittel':'var(--yellow)',
+  'Hoch':'var(--orange)','high':'var(--orange)','Kritisch':'var(--red)'
+};
+
+function countBy(tickets, keyFn) {
+  const m = {};
+  tickets.forEach(t => { const k = keyFn(t)||'(leer)'; m[k] = (m[k]||0)+1; });
+  return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+}
+
+function barChart(data, colorFn, maxVal) {
+  if (!maxVal) maxVal = Math.max(...data.map(d=>d[1]),1);
+  return `<div class="rpt-bar-chart">${data.map(([label,val])=>{
+    const pct = Math.round(val/maxVal*100);
+    const color = colorFn(label);
+    return `<div class="rpt-bar-row">
+      <div class="rpt-bar-label" title="${esc(label)}">${esc(label)}</div>
+      <div class="rpt-bar-track">
+        <div class="rpt-bar-fill" style="width:${Math.max(pct,3)}%;background:${color};">
+          ${pct>15?`<span class="rpt-bar-val">${val}</span>`:''}
+        </div>
+      </div>
+      ${pct<=15?`<span class="rpt-bar-val-out">${val}</span>`:''}
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function stackedChart(rows, colorMap) {
+  // rows: [{label, counts:{status:n,...}}]
+  const legend = Object.keys(colorMap);
+  let html = '';
+  rows.forEach(row => {
+    const total = Object.values(row.counts).reduce((a,b)=>a+b,0);
+    if (!total) return;
+    html += `<div class="rpt-bar-row">
+      <div class="rpt-bar-label" title="${esc(row.label)}">${esc(row.label)}</div>
+      <div class="rpt-bar-track"><div class="rpt-stacked-row">`;
+    legend.forEach(st => {
+      const n = row.counts[st]||0;
+      if (!n) return;
+      const pct = (n/total*100);
+      html += `<div class="rpt-stacked-seg" style="width:${pct}%;background:${colorMap[st]||'#94a3b8'};" title="${esc(st)}: ${n}">${n>0&&pct>8?n:''}</div>`;
+    });
+    html += `</div></div>
+      <span class="rpt-bar-val-out">${total}</span>
+    </div>`;
+  });
+  html += `<div class="rpt-legend">${legend.map(s=>`<div class="rpt-legend-item"><div class="rpt-legend-dot" style="background:${colorMap[s]||'#94a3b8'};"></div>${esc(s)}</div>`).join('')}</div>`;
+  return html;
+}
+
+function buildReports() {
+  const c = $id('reports-container');
+  if (!allTickets.length) { c.innerHTML='<div class="empty">Keine Ticketdaten vorhanden.</div>'; return; }
+
+  const cStatus = getCol('status')||'Status';
+  const cPrio   = getCol('prio');
+  const cWerk   = getCol('werk');
+  const cKat    = getCol('category');
+  const cType   = getCol('type');
+
+  dbg('buildReports', {tickets: allTickets.length, cStatus, cPrio, cWerk, cKat});
+
+  // KPIs
+  const total = allTickets.length;
+  const offen = allTickets.filter(t=>{const s=(t.fields||{})[cStatus]||'';return s==='Offen'||s==='Neu';}).length;
+  const bearbeitung = allTickets.filter(t=>((t.fields||{})[cStatus]||'').includes('Bearbeitung')).length;
+  const erledigt = allTickets.filter(t=>((t.fields||{})[cStatus]||'')==='Erledigt').length;
+  const last30 = allTickets.filter(t=>new Date(t.createdDateTime)>new Date(Date.now()-30*86400000)).length;
+
+  let html = `<div class="rpt-card rpt-card-full">
+    <div class="rpt-title">📈 Übersicht</div>
+    <div class="rpt-kpi-row">
+      <div class="rpt-kpi"><div class="rpt-kpi-num">${total}</div><div class="rpt-kpi-label">Gesamt</div></div>
+      <div class="rpt-kpi"><div class="rpt-kpi-num" style="color:var(--blue);">${offen}</div><div class="rpt-kpi-label">Offen / Neu</div></div>
+      <div class="rpt-kpi"><div class="rpt-kpi-num" style="color:var(--yellow);">${bearbeitung}</div><div class="rpt-kpi-label">In Bearbeitung</div></div>
+      <div class="rpt-kpi"><div class="rpt-kpi-num" style="color:var(--green);">${erledigt}</div><div class="rpt-kpi-label">Erledigt</div></div>
+      <div class="rpt-kpi"><div class="rpt-kpi-num" style="color:var(--navy);">${last30}</div><div class="rpt-kpi-label">Letzte 30 Tage</div></div>
+    </div>
+  </div>`;
+
+  html += '<div class="rpt-grid">';
+
+  // Status chart
+  const statusData = countBy(allTickets, t=>(t.fields||{})[cStatus]||'');
+  html += `<div class="rpt-card">
+    <div class="rpt-title">🔵 Tickets nach Status</div>
+    ${barChart(statusData, l=>STATUS_COLORS[l]||'#94a3b8')}
+  </div>`;
+
+  // Prio chart
+  if (cPrio) {
+    const prioData = countBy(allTickets, t=>(t.fields||{})[cPrio]||'');
+    html += `<div class="rpt-card">
+      <div class="rpt-title">🔴 Tickets nach Priorität</div>
+      ${barChart(prioData, l=>PRIO_COLORS[l]||'#94a3b8')}
+    </div>`;
+  }
+
+  // Werk chart
+  if (cWerk) {
+    const werkData = countBy(allTickets, t=>(t.fields||{})[cWerk]||'');
+    html += `<div class="rpt-card">
+      <div class="rpt-title">🏭 Tickets nach Werk</div>
+      ${barChart(werkData, ()=>'var(--navy)')}
+    </div>`;
+  }
+
+  // Kategorie chart
+  if (cKat) {
+    const katData = countBy(allTickets, t=>(t.fields||{})[cKat]||'');
+    html += `<div class="rpt-card">
+      <div class="rpt-title">📂 Tickets nach Kategorie</div>
+      ${barChart(katData, ()=>'var(--blue)')}
+    </div>`;
+  }
+
+  // Werk × Status stacked
+  if (cWerk) {
+    const werke = [...new Set(allTickets.map(t=>(t.fields||{})[cWerk]||'(leer)'))].sort();
+    const statusKeys = Object.keys(STATUS_COLORS);
+    const rows = werke.map(w => {
+      const counts = {};
+      statusKeys.forEach(s=>counts[s]=0);
+      allTickets.filter(t=>(t.fields||{})[cWerk]===w||(!w&&!(t.fields||{})[cWerk])).forEach(t=>{
+        const st = (t.fields||{})[cStatus]||'';
+        const matched = statusKeys.find(s=>st.includes(s));
+        if(matched) counts[matched]++;
+        else counts[st]=(counts[st]||0)+1;
+      });
+      return {label:w||'(leer)',counts};
+    });
+    html += `<div class="rpt-card rpt-card-full">
+      <div class="rpt-title">🏭 Werk × Status (Übersicht)</div>
+      ${stackedChart(rows, STATUS_COLORS)}
+    </div>`;
+  }
+
+  // Timeline: Tickets pro Monat (letzte 12 Monate)
+  const months = {};
+  const now = new Date();
+  for (let i=11;i>=0;i--) {
+    const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+    const key = d.toLocaleDateString('de-DE',{month:'short',year:'2-digit'});
+    months[key] = 0;
+  }
+  allTickets.forEach(t => {
+    const d = new Date(t.createdDateTime);
+    const key = d.toLocaleDateString('de-DE',{month:'short',year:'2-digit'});
+    if (key in months) months[key]++;
+  });
+  const timeData = Object.entries(months);
+  html += `<div class="rpt-card rpt-card-full">
+    <div class="rpt-title">📅 Tickets pro Monat (letzte 12 Monate)</div>
+    ${barChart(timeData, ()=>'var(--navy)')}
+  </div>`;
+
+  html += '</div>';
+
+  c.innerHTML = html;
+  $id('rpt-info').textContent = `Basierend auf ${allTickets.length} Tickets`;
+  dbg('Reports gerendert ✓');
 }
 
 // ════════════════════════════════════════════════════════════════
