@@ -308,6 +308,7 @@ header{
       <button class="hdr-tab on" id="tab-tickets" onclick="showPanel('tickets')">🎫 Tickets</button>
       <button class="hdr-tab"    id="tab-reports" onclick="showPanel('reports')">📊 Reports</button>
       <button class="hdr-tab"    id="tab-devices" onclick="showPanel('devices')">💻 Geräte</button>
+      <button class="hdr-tab"    id="tab-dms"     onclick="showPanel('dms')">📄 DMS</button>
       <button class="hdr-tab"    id="tab-perms"   onclick="showPanel('perms')">🔒 Berechtigungen</button>
       <button class="hdr-tab"    id="tab-auto"    onclick="showPanel('auto')">⚡ Automatismen</button>
     </nav>
@@ -424,6 +425,11 @@ header{
           <div class="sidebar-actions" id="dev-sb-actions"></div>
         </div>
       </div>
+    </div>
+
+    <!-- DMS PANEL -->
+    <div class="panel" id="panel-dms" style="overflow:hidden;">
+      <iframe id="dms-iframe" src="https://dfedorov12.github.io/dms/" style="width:100%;height:100%;border:none;" allow="clipboard-write"></iframe>
     </div>
 
     <!-- PERMISSIONS PANEL -->
@@ -766,7 +772,7 @@ function clearDebug() {
 // PANEL SWITCHING
 // ════════════════════════════════════════════════════════════════
 function showPanel(id) {
-  ['tickets','reports','devices','perms','auto'].forEach(p => {
+  ['tickets','reports','devices','dms','perms','auto'].forEach(p => {
     const panel = $id('panel-'+p);
     const tab = $id('tab-'+p);
     if(panel) panel.classList.toggle('active', p===id);
@@ -817,6 +823,7 @@ function getCol(alias) {
 let ticketSiteId = null;
 let ticketListId = null;
 let ticketCols   = {};   // internal → display
+let ticketChoices= {};   // internal → [choice1, choice2, ...]
 let allTickets   = [];
 let editingId    = null;
 let allNextLink  = null;
@@ -825,6 +832,34 @@ let allPrevSkip = 0;
 let totalTicketCount = 0;
 let allOlderNextUrl = null;
 let displayedCount = 100;
+
+// ── TICKET CACHE (sessionStorage) ──
+function saveTicketCache() {
+  try {
+    sessionStorage.setItem('dihag_tickets', JSON.stringify(allTickets));
+    sessionStorage.setItem('dihag_ticketCols', JSON.stringify(ticketCols));
+    sessionStorage.setItem('dihag_ticketIds', JSON.stringify({siteId:ticketSiteId,listId:ticketListId}));
+    dbg('Cache gespeichert', {tickets: allTickets.length});
+  } catch(e) { dbg('Cache-Fehler', e.message); }
+}
+
+function restoreTicketCache() {
+  try {
+    const raw = sessionStorage.getItem('dihag_tickets');
+    const colsRaw = sessionStorage.getItem('dihag_ticketCols');
+    const idsRaw = sessionStorage.getItem('dihag_ticketIds');
+    if (raw && colsRaw && idsRaw) {
+      allTickets = JSON.parse(raw);
+      ticketCols = JSON.parse(colsRaw);
+      const ids = JSON.parse(idsRaw);
+      ticketSiteId = ids.siteId;
+      ticketListId = ids.listId;
+      dbg('Cache wiederhergestellt', {tickets: allTickets.length});
+      return true;
+    }
+  } catch(e) { dbg('Cache-Restore-Fehler', e.message); }
+  return false;
+}
 
 function filterActive() {
   return !!($id('tkt-search').value.trim() ||
@@ -932,8 +967,16 @@ function loadMoreTickets() {
 
 async function initTickets() {
   try {
-    $id('tkt-empty').style.display='block';
-    $id('tkt-empty').textContent='Verbinde…';
+    // Restore from cache for instant display
+    if (restoreTicketCache()) {
+      sortByCreatedDesc(allTickets);
+      buildFilterOptions(allTickets);
+      renderTickets(allTickets.slice(0, displayedCount));
+      $id('tkt-count').textContent = allTickets.length + ' Tickets (Cache)';
+    } else {
+      $id('tkt-empty').style.display='block';
+      $id('tkt-empty').textContent='Verbinde…';
+    }
     dbg('initTickets: Verbinde mit SharePoint…');
     const site = await gGet(`/sites/${TICKET_SITE}`);
     ticketSiteId = site.id;
@@ -945,8 +988,12 @@ async function initTickets() {
     ticketListId = lst.id;
     dbg('Ticketliste gefunden', {listId: ticketListId, name: lst.displayName});
     const cols = await gGet(`/sites/${ticketSiteId}/lists/${ticketListId}/columns?$top=200`);
-    (cols.value||[]).forEach(c=>{ if(!c.readOnly) ticketCols[c.name]=c.displayName; });
-    dbg('Spalten geladen', {anzahl: Object.keys(ticketCols).length, spalten: Object.keys(ticketCols)});
+    (cols.value||[]).forEach(c=>{
+      if(!c.readOnly) ticketCols[c.name]=c.displayName;
+      // Store choice options for dropdown fields
+      if(c.choice?.choices?.length) ticketChoices[c.name]=c.choice.choices;
+    });
+    dbg('Spalten geladen', {anzahl: Object.keys(ticketCols).length, choices: Object.keys(ticketChoices)});
     streamTickets();
   } catch(e) {
     dbg('FEHLER initTickets', e.message);
@@ -983,6 +1030,7 @@ async function streamTickets() {
       $id('tkt-count').textContent=allTickets.length+' Tickets (neueste)';
     }
     dbg(`PHASE 1 abgeschlossen ✓`, {tickets: allTickets.length});
+    saveTicketCache();
     if(filterActive()) filterTickets();
     renderLoadMore();
 
@@ -1026,6 +1074,7 @@ async function loadOlderTicketsInBackground(recentDate) {
     allTicketsComplete=true;
     renderLoadMore();
     dbg(`PHASE 2 abgeschlossen ✓ — Gesamt: ${allTickets.length} Tickets im Cache (für Suche/Filter bereit)`);
+    saveTicketCache();
     $id('tkt-count').textContent=allTickets.length+' Tickets';
     console.log('[Tickets] komplett:', allTickets.length);
   } catch(e) {
@@ -1166,6 +1215,26 @@ function openTicketDetail(id) {
       return;
     }
 
+    // Choice fields → dropdown select
+    if (ticketChoices[k]) {
+      const curVal = String(v||'');
+      html+=`<div class="field-row"><label>${esc(label)}</label>
+        <select data-fk="${esc(k)}" style="padding:7px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;font-size:12px;">
+          <option value="">— wählen —</option>
+          ${ticketChoices[k].map(c=>`<option value="${esc(c)}"${c===curVal?' selected':''}>${esc(c)}</option>`).join('')}
+        </select></div>`;
+      return;
+    }
+
+    // Date fields → readonly, formatted
+    const isDateField = /^(Created|Modified|Erstellt|Geändert|Datum|Date|Fällig|SLA)/i.test(k) ||
+                        (typeof v==='string' && /^\d{4}-\d{2}-\d{2}T/.test(v));
+    if (isDateField && v) {
+      html+=`<div class="field-row"><label>${esc(label)}</label>
+        <input value="${fmtFull(v)}" style="font-size:12px;background:var(--bg);color:var(--text-dim);cursor:default;" readonly tabindex="-1"/></div>`;
+      return;
+    }
+
     // Regular fields
     let valStr;
     if (typeof v === 'object') {
@@ -1299,6 +1368,26 @@ function openTicketFullscreen(id) {
     if(k===assignedCol || k===authorCol || isPersonJson || isPersonObj) {
       html+=`<div class="fs-field"><div class="fs-field-label">${esc(label)}</div>
         <div class="fs-field-val">${esc(personName(v))}</div></div>`;
+      return;
+    }
+
+    // Choice fields → dropdown
+    if (ticketChoices[k]) {
+      const curVal = String(v||'');
+      html+=`<div class="fs-field"><div class="fs-field-label">${esc(label)}</div>
+        <select data-fk="${esc(k)}" style="width:100%;padding:6px 10px;border:1.5px solid var(--border2);border-radius:6px;font-size:13px;font-family:inherit;">
+          <option value="">— wählen —</option>
+          ${ticketChoices[k].map(c=>`<option value="${esc(c)}"${c===curVal?' selected':''}>${esc(c)}</option>`).join('')}
+        </select></div>`;
+      return;
+    }
+
+    // Date fields → readonly formatted
+    const isDateField = /^(Created|Modified|Erstellt|Geändert|Datum|Date|Fällig|SLA)/i.test(k) ||
+                        (typeof v==='string' && /^\d{4}-\d{2}-\d{2}T/.test(v));
+    if (isDateField && v) {
+      html+=`<div class="fs-field"><div class="fs-field-label">${esc(label)}</div>
+        <div class="fs-field-val" style="color:var(--text-dim);">${fmtFull(v)}</div></div>`;
       return;
     }
 
@@ -1673,17 +1762,30 @@ async function loadDevices(force) {
   $id('dev-table').style.display='none';
   try {
     if (!devSiteId) {
+      dbg('Geräte: Verbinde mit Site…', DEV_SITE);
       const site = await gGet(`/sites/${DEV_SITE}`);
       devSiteId = site.id;
+      dbg('Geräte: Site gefunden', {id: devSiteId});
     }
     if (!devListId) {
-      const lists = await gGet(`/sites/${devSiteId}/lists?$select=id,name,displayName&$top=100`);
-      const lst = (lists.value||[]).find(l=>l.name===DEV_LIST_NAME||l.displayName===DEV_LIST_NAME)
-               || (lists.value||[]).find(l=>l.name.toLowerCase().includes('azure')||l.displayName.toLowerCase().includes('azure'));
-      if (!lst) throw new Error('Liste nicht gefunden: '+(lists.value||[]).map(l=>l.displayName).join(', '));
+      const lists = await gGet(`/sites/${devSiteId}/lists?$select=id,name,displayName&$top=200`);
+      dbg('Geräte: Verfügbare Listen', (lists.value||[]).map(l=>`${l.displayName} (${l.name})`));
+      // Flexible matching: exact, includes azure/gerät/device
+      const match = (l,s) => l.name===s||l.displayName===s;
+      const fuzzy = l => {
+        const n = (l.name+' '+l.displayName).toLowerCase();
+        return n.includes('azure') || n.includes('gerät') || n.includes('gerte') || n.includes('device');
+      };
+      const lst = (lists.value||[]).find(l=>match(l,DEV_LIST_NAME))
+               || (lists.value||[]).find(l=>match(l,'Azure Geräte'))
+               || (lists.value||[]).find(l=>match(l,'AzureGeräte'))
+               || (lists.value||[]).find(fuzzy);
+      if (!lst) throw new Error('Geräte-Liste nicht gefunden. Verfügbar: '+(lists.value||[]).map(l=>l.displayName).join(', '));
       devListId = lst.id;
+      dbg('Geräte: Liste gefunden', {id: devListId, name: lst.displayName});
       const cols = await gGet(`/sites/${devSiteId}/lists/${devListId}/columns?$top=200`);
       (cols.value||[]).forEach(c=>{ if(!c.readOnly) devCols[c.name]=c.displayName; });
+      dbg('Geräte: Spalten', Object.keys(devCols));
     }
     // Load items
     let url = `/sites/${devSiteId}/lists/${devListId}/items?$expand=fields&$top=100`;
@@ -1885,10 +1987,21 @@ document.addEventListener('click', e => {
 });
 
 async function spGet(url) {
-  const tok = await getSpToken();
-  const r = await fetch(url, {headers:{Authorization:'Bearer '+tok, Accept:'application/json;odata=verbose'}});
-  if (!r.ok) throw new Error(`SP ${r.status}: ${await r.text().catch(()=>'')}`);
-  return r.json();
+  // Try SP token first, then Graph token as fallback
+  for (const getTokenFn of [getSpToken, getToken]) {
+    try {
+      const tok = await getTokenFn();
+      const r = await fetch(url, {headers:{Authorization:'Bearer '+tok, Accept:'application/json;odata=verbose'}});
+      if (r.ok) return r.json();
+      if (r.status === 403 && getTokenFn === getSpToken) {
+        dbg('SP-Token 403, versuche Graph-Token…');
+        continue; // try next token
+      }
+      throw new Error(`SP ${r.status}: ${await r.text().catch(()=>'')}`);
+    } catch(e) {
+      if (getTokenFn === getToken) throw e; // both failed
+    }
+  }
 }
 
 function roleIcon(role) {
@@ -1969,18 +2082,36 @@ async function startPermScan() {
     const siteName = permSiteUrl.split('/').pop();
 
     // ── STUFE 1: Site perms ──
-    const sitePerms = await spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings`);
-    const siteRA = sitePerms.d?.results || [];
-    dbg('Stufe 1', {members: siteRA.length});
-
-    const siteMembers = `<div class="perm-members" style="padding:4px 0;">${renderMembersTree(siteRA)}</div>`;
+    let siteMembers = '';
+    try {
+      const sitePerms = await spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings`);
+      const siteRA = sitePerms.d?.results || [];
+      dbg('Stufe 1', {members: siteRA.length});
+      siteMembers = `<div class="perm-members" style="padding:4px 0;">${renderMembersTree(siteRA)}</div>`;
+    } catch(e) {
+      dbg('Stufe 1 Fehler (ggf. fehlende Berechtigung)', e.message);
+      siteMembers = `<div style="padding:10px;background:var(--red-bg);border-radius:8px;font-size:11px;color:var(--red);">
+        ⚠ Kein Zugriff auf Site-Berechtigungen (403).<br>
+        <span style="color:var(--text-dim);">Benötigt: Site Collection Admin oder Sites.FullControl.All</span>
+      </div>`;
+    }
 
     // ── STUFE 2 ──
     $id('perm-status').innerHTML = '<span class="perm-spinner"></span> Stufe 2: Bibliotheken & Listen…';
-    const listsData = await spGet(`${permSiteUrl}/_api/web/lists?$filter=Hidden eq false&$select=Title,Id,BaseTemplate,HasUniqueRoleAssignments,ItemCount&$top=200`);
-    const lists = listsData.d?.results || [];
-    const libs = lists.filter(l=>[101,700].includes(l.BaseTemplate));
-    const otherLists = lists.filter(l=>![101,700].includes(l.BaseTemplate));
+    let lists = [], libs = [], otherLists = [];
+    try {
+      const listsData = await spGet(`${permSiteUrl}/_api/web/lists?$filter=Hidden eq false&$select=Title,Id,BaseTemplate,HasUniqueRoleAssignments,ItemCount&$top=200`);
+      lists = listsData.d?.results || [];
+    } catch(e) {
+      dbg('Stufe 2 Listen-Fehler, versuche Graph…', e.message);
+      // Fallback: use Graph to at least list the libraries
+      try {
+        const gLists = await gGet(`/sites/${permSiteId}/lists?$select=id,displayName,list&$top=200`);
+        lists = (gLists.value||[]).map(l=>({Title:l.displayName, Id:l.id, BaseTemplate:l.list?.template==='documentLibrary'?101:0, HasUniqueRoleAssignments:false, ItemCount:'?'}));
+      } catch {}
+    }
+    libs = lists.filter(l=>[101,700].includes(l.BaseTemplate));
+    otherLists = lists.filter(l=>![101,700].includes(l.BaseTemplate));
     permLibraries = libs;
 
     let subsites = [];
@@ -2138,6 +2269,181 @@ async function loadFolderPermsTree() {
 // AUTOMATISMEN
 // ════════════════════════════════════════════════════════════════
 const AUTO_FORMS = {
+  onboarding:{
+    title:'👋 Onboarding',tag:'Neuer Mitarbeiter',icon:'👋',
+    desc:'Neuen Mitarbeiter einrichten — AD, E-Mail, Teams, Lizenzen, Hardware',
+    sections:[
+      {label:'Mitarbeiterdaten',fields:[
+        {key:'vorname',label:'Vorname',type:'text',required:true},
+        {key:'nachname',label:'Nachname',type:'text',required:true},
+        {key:'email',label:'E-Mail-Adresse',type:'email',required:true,placeholder:'v.nachname@dihag.de'},
+        {key:'abteilung',label:'Abteilung',type:'text'},
+        {key:'vorgesetzter',label:'Vorgesetzter',type:'text'},
+        {key:'standort',label:'Standort / Werk',type:'text'},
+        {key:'startdatum',label:'Startdatum',type:'date',required:true},
+      ]},
+      {label:'IT-Einrichtung',fields:[
+        {key:'ad_anlegen',label:'AD-Konto anlegen',type:'checkbox',def:true},
+        {key:'email_anlegen',label:'E-Mail-Postfach einrichten',type:'checkbox',def:true},
+        {key:'teams',label:'Teams-Lizenz zuweisen',type:'checkbox',def:true},
+        {key:'vpn',label:'VPN-Zugang einrichten',type:'checkbox',def:false},
+        {key:'sharepoint',label:'SharePoint-Zugriff',type:'checkbox',def:true},
+      ]},
+      {label:'Hardware',fields:[
+        {key:'laptop',label:'Laptop benötigt',type:'checkbox',def:true},
+        {key:'monitor',label:'Monitor benötigt',type:'checkbox',def:false},
+        {key:'headset',label:'Headset benötigt',type:'checkbox',def:false},
+        {key:'handy',label:'Diensthandy benötigt',type:'checkbox',def:false},
+        {key:'hw_notiz',label:'Hardware-Details',type:'textarea',placeholder:'Spezielle Anforderungen…'},
+      ]},
+      {label:'Sonstiges',fields:[
+        {key:'notizen',label:'Notizen',type:'textarea'},
+      ]},
+    ],
+    submit:'👋 Onboarding-Ticket erstellen',
+    onSubmit: async d=>{
+      const title=`Onboarding: ${d.vorname} ${d.nachname}`;
+      const body=`Neuer Mitarbeiter: ${d.vorname} ${d.nachname}\nE-Mail: ${d.email}\nAbteilung: ${d.abteilung||'-'}\nVorgesetzter: ${d.vorgesetzter||'-'}\nStandort: ${d.standort||'-'}\nStartdatum: ${d.startdatum}\n\nIT-Einrichtung:\n• AD-Konto: ${d.ad_anlegen?'✓':'✗'}\n• E-Mail: ${d.email_anlegen?'✓':'✗'}\n• Teams: ${d.teams?'✓':'✗'}\n• VPN: ${d.vpn?'✓':'✗'}\n• SharePoint: ${d.sharepoint?'✓':'✗'}\n\nHardware:\n• Laptop: ${d.laptop?'✓':'✗'}\n• Monitor: ${d.monitor?'✓':'✗'}\n• Headset: ${d.headset?'✓':'✗'}\n• Diensthandy: ${d.handy?'✓':'✗'}\n${d.hw_notiz?'Details: '+d.hw_notiz:''}\n\nNotizen: ${d.notizen||'-'}`;
+      if(ticketSiteId&&ticketListId){
+        const colTitle=col(['Titel','Title'])||'Title';
+        const colStatus=col(['Status'])||'Status';
+        const colPrio=col(['Priorität','Priority']);
+        const fields={[colTitle]:title};
+        if(colStatus) fields[colStatus]='Offen';
+        if(colPrio) fields[colPrio]='Hoch';
+        const colDesc=col(['Beschreibung','Description','Kommentar']);
+        if(colDesc) fields[colDesc]=body;
+        await gPost(`/sites/${ticketSiteId}/lists/${ticketListId}/items`,{fields});
+        toast('✓ Onboarding-Ticket erstellt','success');
+        showPanel('tickets'); await streamTickets();
+      } else { await navigator.clipboard.writeText(body).catch(()=>{}); toast('In Zwischenablage kopiert','info'); }
+    }
+  },
+  hw_anfrage:{
+    title:'🖥️ Hardware-Anfrage',tag:'Bestellung',icon:'🖥️',
+    desc:'Neue Hardware bestellen — Laptop, Monitor, Peripherie',
+    sections:[
+      {label:'Antragsteller',fields:[
+        {key:'name',label:'Name',type:'text',required:true},
+        {key:'abteilung',label:'Abteilung',type:'text'},
+        {key:'standort',label:'Standort',type:'text'},
+      ]},
+      {label:'Gewünschte Hardware',fields:[
+        {key:'typ',label:'Gerätetyp',type:'select',required:true,def:'laptop',options:[
+          {value:'laptop',label:'Laptop'},{value:'desktop',label:'Desktop-PC'},{value:'monitor',label:'Monitor'},
+          {value:'headset',label:'Headset'},{value:'drucker',label:'Drucker'},{value:'handy',label:'Diensthandy'},
+          {value:'sonstige',label:'Sonstiges'},
+        ]},
+        {key:'grund',label:'Begründung',type:'textarea',required:true,placeholder:'Warum wird das Gerät benötigt?'},
+        {key:'dringend',label:'Dringend (< 1 Woche)',type:'checkbox',def:false},
+      ]},
+    ],
+    submit:'🖥️ Anfrage erstellen',
+    onSubmit: async d=>{
+      const title=`Hardware-Anfrage: ${d.typ} für ${d.name}`;
+      const body=`Antragsteller: ${d.name}\nAbteilung: ${d.abteilung||'-'}\nStandort: ${d.standort||'-'}\nGerätetyp: ${d.typ}\nDringend: ${d.dringend?'Ja':'Nein'}\n\nBegründung:\n${d.grund}`;
+      if(ticketSiteId&&ticketListId){
+        const fields={[col(['Titel','Title'])||'Title']:title};
+        const cs=col(['Status']); if(cs) fields[cs]='Offen';
+        const cp=col(['Priorität','Priority']); if(cp) fields[cp]=d.dringend?'Hoch':'Normal';
+        const cd=col(['Beschreibung','Description','Kommentar']); if(cd) fields[cd]=body;
+        await gPost(`/sites/${ticketSiteId}/lists/${ticketListId}/items`,{fields});
+        toast('✓ Hardware-Anfrage erstellt','success');
+        showPanel('tickets'); await streamTickets();
+      } else { await navigator.clipboard.writeText(body).catch(()=>{}); toast('In Zwischenablage kopiert','info'); }
+    }
+  },
+  zugang:{
+    title:'🔑 Zugangsanfrage',tag:'Berechtigung',icon:'🔑',
+    desc:'VPN, Systeme, SharePoint-Sites, Laufwerke beantragen',
+    sections:[
+      {label:'Antragsteller',fields:[
+        {key:'name',label:'Für Mitarbeiter',type:'text',required:true},
+        {key:'email',label:'E-Mail',type:'email',required:true},
+      ]},
+      {label:'Zugang',fields:[
+        {key:'system',label:'System / Ressource',type:'text',required:true,placeholder:'z.B. VPN, SAP, SharePoint /sites/HR…'},
+        {key:'berechtigung',label:'Gewünschte Berechtigung',type:'select',def:'lesen',options:[
+          {value:'lesen',label:'Lesen'},{value:'bearbeiten',label:'Bearbeiten'},{value:'vollzugriff',label:'Vollzugriff'},
+        ]},
+        {key:'grund',label:'Begründung',type:'textarea',required:true},
+        {key:'befristet',label:'Befristet bis (optional)',type:'date'},
+      ]},
+    ],
+    submit:'🔑 Zugang beantragen',
+    onSubmit: async d=>{
+      const title=`Zugangsanfrage: ${d.system} für ${d.name}`;
+      const body=`Mitarbeiter: ${d.name} (${d.email})\nSystem: ${d.system}\nBerechtigung: ${d.berechtigung}\nBefristet: ${d.befristet||'unbefristet'}\n\nBegründung:\n${d.grund}`;
+      if(ticketSiteId&&ticketListId){
+        const fields={[col(['Titel','Title'])||'Title']:title};
+        const cs=col(['Status']); if(cs) fields[cs]='Offen';
+        const cd=col(['Beschreibung','Description','Kommentar']); if(cd) fields[cd]=body;
+        await gPost(`/sites/${ticketSiteId}/lists/${ticketListId}/items`,{fields});
+        toast('✓ Zugangsanfrage erstellt','success');
+        showPanel('tickets'); await streamTickets();
+      } else { await navigator.clipboard.writeText(body).catch(()=>{}); toast('In Zwischenablage kopiert','info'); }
+    }
+  },
+  software:{
+    title:'📊 Software-Anfrage',tag:'Lizenz',icon:'📊',
+    desc:'Software-Lizenzen beantragen — Office, Spezial-Software',
+    sections:[
+      {label:'Antragsteller',fields:[
+        {key:'name',label:'Name',type:'text',required:true},
+        {key:'abteilung',label:'Abteilung',type:'text'},
+      ]},
+      {label:'Software',fields:[
+        {key:'software',label:'Software / Lizenz',type:'text',required:true,placeholder:'z.B. Adobe Acrobat Pro, Visio, AutoCAD…'},
+        {key:'anzahl',label:'Anzahl Lizenzen',type:'text',def:'1'},
+        {key:'grund',label:'Begründung',type:'textarea',required:true},
+      ]},
+    ],
+    submit:'📊 Anfrage erstellen',
+    onSubmit: async d=>{
+      const title=`Software-Anfrage: ${d.software} für ${d.name}`;
+      const body=`Antragsteller: ${d.name}\nAbteilung: ${d.abteilung||'-'}\nSoftware: ${d.software}\nAnzahl: ${d.anzahl||'1'}\n\n${d.grund}`;
+      if(ticketSiteId&&ticketListId){
+        const fields={[col(['Titel','Title'])||'Title']:title};
+        const cs=col(['Status']); if(cs) fields[cs]='Offen';
+        const cd=col(['Beschreibung','Description','Kommentar']); if(cd) fields[cd]=body;
+        await gPost(`/sites/${ticketSiteId}/lists/${ticketListId}/items`,{fields});
+        toast('✓ Software-Anfrage erstellt','success');
+        showPanel('tickets'); await streamTickets();
+      } else { await navigator.clipboard.writeText(body).catch(()=>{}); toast('In Zwischenablage kopiert','info'); }
+    }
+  },
+  standortwechsel:{
+    title:'🏢 Standortwechsel',tag:'IT-Umzug',icon:'🏢',
+    desc:'Arbeitsplatz-Umzug planen — Drucker, Netzwerk, Telefon',
+    sections:[
+      {label:'Mitarbeiter',fields:[
+        {key:'name',label:'Name',type:'text',required:true},
+        {key:'von',label:'Aktueller Standort',type:'text',required:true},
+        {key:'nach',label:'Neuer Standort',type:'text',required:true},
+        {key:'datum',label:'Umzugsdatum',type:'date',required:true},
+      ]},
+      {label:'Betroffene IT',fields:[
+        {key:'pc',label:'PC/Laptop umziehen',type:'checkbox',def:true},
+        {key:'telefon',label:'Telefon umziehen',type:'checkbox',def:false},
+        {key:'drucker',label:'Drucker-Zuordnung ändern',type:'checkbox',def:false},
+        {key:'netzwerk',label:'Netzwerkdose einrichten',type:'checkbox',def:false},
+        {key:'notizen',label:'Sonstiges',type:'textarea'},
+      ]},
+    ],
+    submit:'🏢 Umzug-Ticket erstellen',
+    onSubmit: async d=>{
+      const title=`Standortwechsel: ${d.name} (${d.von} → ${d.nach})`;
+      const body=`Mitarbeiter: ${d.name}\nVon: ${d.von}\nNach: ${d.nach}\nDatum: ${d.datum}\n\n• PC: ${d.pc?'✓':'✗'}\n• Telefon: ${d.telefon?'✓':'✗'}\n• Drucker: ${d.drucker?'✓':'✗'}\n• Netzwerk: ${d.netzwerk?'✓':'✗'}\n${d.notizen?'\nSonstiges: '+d.notizen:''}`;
+      if(ticketSiteId&&ticketListId){
+        const fields={[col(['Titel','Title'])||'Title']:title};
+        const cs=col(['Status']); if(cs) fields[cs]='Offen';
+        const cd=col(['Beschreibung','Description','Kommentar']); if(cd) fields[cd]=body;
+        await gPost(`/sites/${ticketSiteId}/lists/${ticketListId}/items`,{fields});
+        toast('✓ Umzug-Ticket erstellt','success');
+        showPanel('tickets'); await streamTickets();
+      } else { await navigator.clipboard.writeText(body).catch(()=>{}); toast('In Zwischenablage kopiert','info'); }
+    }
+  },
   offboarding:{
     title:'🚪 Offboarding',tag:'Mitarbeiter-Austritt',icon:'🚪',
     desc:'Mitarbeiter-Austritt verwalten, Zugänge sperren, Hardware zurückfordern',
