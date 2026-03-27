@@ -1235,11 +1235,9 @@ function openTicketDetail(id) {
 
   let html = `<div class="section-title">Status</div>
     <div style="display:flex;align-items:center;gap:10px;">
-      <span class="st-badge" style="font-size:12px;padding:5px 14px;background:${stColors[curStatus]||'#666'}22;color:${stColors[curStatus]||'#666'};">${esc(curStatus)}</span>
-      <span style="font-size:10px;color:var(--text-muted);">→</span>
+      <span class="st-badge" id="sb-status-badge-${id}" style="font-size:12px;padding:5px 14px;background:${stColors[curStatus]||'#666'}22;color:${stColors[curStatus]||'#666'};">${esc(curStatus)}</span>
       <select onchange="changeStatus('${id}',this.value)" style="padding:6px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer;">
-        <option value="">Status ändern…</option>
-        ${statuses.filter(s=>s!==curStatus).map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('')}
+        ${statuses.map(s=>`<option value="${esc(s)}"${s===curStatus?' selected':''}>${esc(s)}</option>`).join('')}
       </select>
     </div>`;
 
@@ -1274,13 +1272,25 @@ function openTicketDetail(id) {
       return;
     }
 
-    // Person fields (known columns or JSON arrays with LookupValue/Email)
+    // Person fields — editable with user search
     const isPersonJson = typeof v === 'string' && v.startsWith('[') && /LookupValue|Email/.test(v);
     const isPersonObj = Array.isArray(v) && v.length && (v[0].LookupValue || v[0].Email);
     if(k===assignedCol || k===authorCol || isPersonJson || isPersonObj) {
       const nameStr = personName(v);
-      html+=`<div class="field-row"><label>${esc(label)}</label>
-        <input value="${esc(nameStr)}" style="font-size:12px;background:var(--bg);cursor:default;" readonly tabindex="-1"/></div>`;
+      const isEditable = (k===assignedCol); // only AssignedTo is editable
+      if(isEditable){
+        const fid='ppl_'+k.replace(/[^a-z0-9]/gi,'_');
+        html+=`<div class="field-row"><label>${esc(label)}</label>
+          <div style="position:relative;">
+            <input id="${fid}" data-fk-person="${esc(k)}" value="${esc(nameStr)}" style="font-size:12px;width:100%;" placeholder="Name suchen…" oninput="searchUsers(this,'${fid}_dd')" autocomplete="off"/>
+            <div id="${fid}_dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border2);border-top:none;border-radius:0 0 7px 7px;z-index:200;max-height:180px;overflow:auto;box-shadow:var(--shadow);"></div>
+            <input type="hidden" id="${fid}_id" data-fk="${esc(k)}LookupId"/>
+          </div>
+        </div>`;
+      } else {
+        html+=`<div class="field-row"><label>${esc(label)}</label>
+          <input value="${esc(nameStr)}" style="font-size:12px;background:var(--bg);cursor:default;" readonly tabindex="-1"/></div>`;
+      }
       return;
     }
 
@@ -1542,30 +1552,36 @@ async function fetchTicketAttachmentsFs(id) {
 }
 
 async function changeStatus(id, newStatus) {
-  if (!ticketSiteId||!ticketListId) return;
+  if (!ticketSiteId||!ticketListId||!newStatus) return;
   const colStatus=col(['Status'])||'Status';
+  const stColors={Offen:'var(--blue)',Neu:'#6366f1','In Bearbeitung':'var(--yellow)','Warten auf Rückmeldung':'var(--orange)',Erledigt:'var(--green)',Abgebrochen:'#6b7280'};
   try {
     await gPatch(`/sites/${ticketSiteId}/lists/${ticketListId}/items/${id}/fields`, {[colStatus]:newStatus});
     const it = allTickets.find(t=>t.id==id);
-    if(it) it.fields[colStatus]=newStatus;
+    if(it) { it.fields = it.fields||{}; it.fields[colStatus]=newStatus; }
+    // Update badge live
+    const badge = document.getElementById('sb-status-badge-'+id);
+    if(badge){ badge.textContent=newStatus; badge.style.background=(stColors[newStatus]||'#666')+'22'; badge.style.color=stColors[newStatus]||'#666'; }
     toast(`Status → ${newStatus}`,'success');
-    renderTickets(allTickets);
-    openTicketDetail(id); // refresh sidebar
+    const list = filterActive() ? applyFilters(allTickets) : allTickets.slice(0,displayedCount);
+    renderTickets(list);
   } catch(e){ toast('Fehler: '+e.message,'error'); }
 }
 
 async function saveSidebar(id) {
   const raw={};
-  $id('sb-body').querySelectorAll('[data-fk]').forEach(el=>{ raw[el.dataset.fk]=el.value; });
+  $id('sb-body').querySelectorAll('[data-fk]').forEach(el=>{
+    if(el.value!==undefined && el.value!=='') raw[el.dataset.fk]=el.value;
+  });
   const fields = stripReadOnly(raw);
   dbg('saveSidebar', {id, fieldCount: Object.keys(fields).length, keys: Object.keys(fields)});
   try {
     await gPatch(`/sites/${ticketSiteId}/lists/${ticketListId}/items/${id}/fields`, fields);
-    // Update local cache
     const it=allTickets.find(t=>t.id==id);
     if(it) Object.assign(it.fields, fields);
     toast('Gespeichert ✓','success');
-    renderTickets(allTickets);
+    const list = filterActive() ? applyFilters(allTickets) : allTickets.slice(0,displayedCount);
+    renderTickets(list);
   } catch(e){ toast('Fehler: '+e.message,'error'); }
 }
 
@@ -2202,74 +2218,63 @@ async function startPermScan() {
   try {
     const siteName = permSiteUrl.split('/').pop();
 
-    // ── STUFE 1: Site perms (multi-fallback) ──
+    // ── STUFE 1: Site perms — parallel: roleassignments + sitegroups with users ──
     let siteMembers = '';
     try {
-      // Strategy 1: roleassignments — expand Member + RoleDefinitions, then fetch users per group
-      const sitePerms = await spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings&$top=100`);
-      const siteRA = sitePerms.d?.results || [];
-      dbg('Stufe 1 via roleassignments', {members: siteRA.length});
-      // For each group (PrincipalType=8), load its users separately
-      for (const ra of siteRA) {
-        if (ra.Member?.PrincipalType === 8 && ra.Member.Id) {
-          try {
-            const gu = await spGet(`${permSiteUrl}/_api/web/sitegroups(${ra.Member.Id})/users?$top=100`);
-            ra.Member.Users = {results: gu.d?.results || []};
-            dbg('Gruppe '+ra.Member.Title+': '+ra.Member.Users.results.length+' User');
-          } catch(ge) { ra.Member.Users = {results:[]}; dbg('Gruppe '+ra.Member.Id+' User-Fehler', ge.message); }
+      // Fetch both in parallel for speed
+      const [raRes, sgRes] = await Promise.allSettled([
+        spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings&$top=100`),
+        spGet(`${permSiteUrl}/_api/web/sitegroups?$expand=Users&$top=100`)
+      ]);
+
+      const roleAssignments = raRes.status==='fulfilled' ? (raRes.value?.d?.results||[]) : [];
+      const siteGroups      = sgRes.status==='fulfilled' ? (sgRes.value?.d?.results||[]) : [];
+      dbg('Stufe 1', {roleAssignments: roleAssignments.length, siteGroups: siteGroups.length});
+
+      // Build group-ID → users map from sitegroups
+      const groupUsersMap = {};
+      siteGroups.forEach(g=>{ if(g.Id) groupUsersMap[g.Id] = g.Users?.results||[]; });
+
+      // Merge users into roleAssignments
+      roleAssignments.forEach(ra=>{
+        if(ra.Member?.PrincipalType===8 && ra.Member?.Id && groupUsersMap[ra.Member.Id]){
+          ra.Member.Users = { results: groupUsersMap[ra.Member.Id] };
         }
-      }
-      siteMembers = `<div class="perm-members" style="padding:4px 0;">${renderMembersTree(siteRA)}</div>`;
-    } catch(e1) {
-      dbg('Stufe 1 roleassignments 403, versuche sitegroups…');
-      try {
-        // Strategy 2: sitegroups (lower perm requirement)
-        const grpData = await spGet(`${permSiteUrl}/_api/web/sitegroups?$expand=Users`);
-        const groups = grpData.d?.results || [];
-        dbg('Stufe 1 via sitegroups', {groups: groups.length});
+      });
+
+      if(roleAssignments.length){
+        siteMembers = `<div class="perm-members" style="padding:4px 0;">${renderMembersTree(roleAssignments)}</div>`;
+      } else if(siteGroups.length){
+        // Fallback: render sitegroups directly if no roleassignments
         siteMembers = `<div class="perm-members" style="padding:4px 0;">`;
-        groups.forEach(g => {
-          const users = g.Users?.results || [];
-          const icon = g.Title?.includes('Besitzer') || g.Title?.includes('Owner') ? '👑' :
-                       g.Title?.includes('Mitglieder') || g.Title?.includes('Member') ? '✏️' : '👁️';
-          const bg = icon === '👑' ? 'var(--red)' : icon === '✏️' ? 'var(--yellow)' : 'var(--green)';
-          const gid = 'sg_'+(++_permGroupCounter);
+        siteGroups.forEach(g=>{
+          const users = g.Users?.results||[];
+          const roleLabel = g.Title?.includes('Besitzer')||g.Title?.includes('Owner')?'Vollzugriff':
+                            g.Title?.includes('Mitglieder')||g.Title?.includes('Member')?'Bearbeiten':'Lesen';
+          const ri = roleIcon(roleLabel);
+          const gid='sg_'+(++_permGroupCounter);
           const usersHtml = users.length
-            ? users.map(u=>`<div class="perm-user-row">
-                <div style="width:20px;height:20px;border-radius:50%;background:#6b7280;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;flex-shrink:0;">👤</div>
-                <span style="font-weight:600;">${esc(u.Title||u.LoginName||'?')}</span>
-                <span style="font-size:10px;color:var(--text-muted);margin-left:auto;">${esc(u.LoginName||u.Email||'')}</span>
-              </div>`).join('')
+            ? users.map(u=>`<div class="perm-user-row"><div style="width:20px;height:20px;border-radius:50%;background:#6b7280;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;flex-shrink:0;">👤</div><span style="font-weight:600;">${esc(u.Title||u.LoginName||'?')}</span><span style="font-size:10px;color:var(--text-muted);margin-left:auto;">${esc(u.LoginName||u.Email||'')}</span></div>`).join('')
             : '<div style="font-size:11px;color:var(--text-muted);padding:4px 6px;">Keine Mitglieder</div>';
-          siteMembers += `<div class="perm-group-row">
+          siteMembers+=`<div class="perm-group-row">
             <div class="perm-group-hdr" onclick="dToggleGroup('${gid}')">
-              <div class="perm-member-icon" style="background:${bg};">${icon}</div>
+              <div class="perm-member-icon" style="background:${ri.bg};">${ri.icon}</div>
               <span style="font-size:13px;">👥</span>
               <span class="perm-member-name">${esc(g.Title)}</span>
               <span style="font-size:9px;padding:2px 7px;background:var(--bg);border:1px solid var(--border);border-radius:10px;color:var(--text-muted);">${users.length} User</span>
+              <span class="perm-member-role">${esc(roleLabel)}</span>
               <span class="perm-group-toggle" id="tg_${gid}">▶</span>
             </div>
             <div class="perm-group-members" id="${gid}">${usersHtml}</div>
           </div>`;
         });
-        siteMembers += `</div>`;
-      } catch(e2) {
-        dbg('Stufe 1 sitegroups auch 403, versuche Graph…');
-        try {
-          // Strategy 3: Graph API — get associated groups
-          const siteInfo = await gGet(`/sites/${permSiteId}?$select=id,displayName`);
-          const graphLists = await gGet(`/sites/${permSiteId}/lists?$top=5`);
-          siteMembers = `<div style="padding:10px;background:var(--amber-bg);border-radius:8px;font-size:11px;color:var(--amber);">
-            ⚠ Eingeschränkter Zugriff — Berechtigungsdetails benötigen höhere Rechte.<br>
-            <span style="color:var(--text-dim);">Site erkannt: ${esc(siteInfo.displayName)} · ${(graphLists.value||[]).length}+ Listen sichtbar</span>
-          </div>`;
-        } catch(e3) {
-          siteMembers = `<div style="padding:10px;background:var(--red-bg);border-radius:8px;font-size:11px;color:var(--red);">
-            ⚠ Kein Zugriff auf Site-Berechtigungen.<br>
-            <span style="color:var(--text-dim);">Kontaktiere den Site-Admin für Zugriff.</span>
-          </div>`;
-        }
+        siteMembers+=`</div>`;
+      } else {
+        siteMembers = `<div style="padding:10px;background:var(--red-bg);border-radius:8px;font-size:11px;color:var(--red);">⚠ Kein Zugriff auf Berechtigungen</div>`;
       }
+    } catch(e1) {
+      dbg('Stufe 1 komplett fehlgeschlagen', e1.message);
+      siteMembers = `<div style="padding:10px;background:var(--red-bg);border-radius:8px;font-size:11px;color:var(--red);">⚠ ${esc(e1.message)}</div>`;
     }
 
     // ── STUFE 2 ──
@@ -2878,26 +2883,81 @@ async function submitAutoForm(){
 }
 
 // ════════════════════════════════════════════════════════════════
-// DMS — Upload-Enhancement (erweitert existierenden Upload-Button)
-// Setzt multiple + webkitdirectory auf alle file-inputs im DMS-iframe
-// Funktioniert nur wenn DMS same-origin oder CORS erlaubt
+// PEOPLE PICKER
+// ════════════════════════════════════════════════════════════════
+let _userSearchTimer = null;
+function searchUsers(inp, ddId) {
+  clearTimeout(_userSearchTimer);
+  const q = inp.value.trim();
+  const dd = document.getElementById(ddId);
+  if (!dd) return;
+  if (q.length < 2) { dd.style.display='none'; return; }
+  _userSearchTimer = setTimeout(async ()=>{
+    try {
+      const res = await gGet(`/users?$filter=startswith(displayName,'${encodeURIComponent(q)}') or startswith(mail,'${encodeURIComponent(q)}')&$select=id,displayName,mail&$top=8`);
+      const users = res.value||[];
+      if(!users.length){ dd.innerHTML='<div style="padding:8px 12px;font-size:11px;color:var(--text-muted);">Keine User gefunden</div>'; dd.style.display='block'; return; }
+      dd.innerHTML = users.map(u=>`<div onclick="selectUser(this,'${dd.id}')" data-name="${esc(u.displayName)}" data-mail="${esc(u.mail||u.userPrincipalName||'')}" data-aad="${esc(u.id)}"
+          style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
+          <div style="font-weight:600;">${esc(u.displayName)}</div>
+          <div style="font-size:10px;color:var(--text-muted);">${esc(u.mail||u.userPrincipalName||'')}</div>
+        </div>`).join('');
+      dd.style.display='block';
+    } catch(e){ dd.innerHTML=`<div style="padding:8px 12px;font-size:11px;color:var(--red);">${esc(e.message)}</div>`; dd.style.display='block'; }
+  }, 300);
+}
+
+async function selectUser(el, ddId) {
+  const dd = document.getElementById(ddId);
+  const inp = dd?.previousElementSibling;
+  const hiddenId = document.getElementById(ddId.replace('_dd','_id'));
+  if (!inp) return;
+  const name = el.dataset.name||'';
+  const mail = el.dataset.mail||'';
+  inp.value = name;
+  if(dd) dd.style.display='none';
+  // Resolve SP user ID via ensureuser
+  if(hiddenId && mail){
+    try {
+      const spTok = await getSpToken();
+      const r = await fetch(`https://dihag.sharepoint.com/sites/ticket/_api/web/ensureuser`,{
+        method:'POST',
+        headers:{Authorization:'Bearer '+spTok,'Content-Type':'application/json;odata=verbose',Accept:'application/json;odata=verbose'},
+        body:JSON.stringify({logonName:`i:0#.f|membership|${mail}`})
+      });
+      const j = await r.json();
+      const spId = j?.d?.Id;
+      if(spId){ hiddenId.value=String(spId); dbg('SP User ID resolved',{name,spId}); }
+    } catch(e){ dbg('ensureuser Fehler',e.message); }
+  }
+}
+
+// Close people picker on outside click
+document.addEventListener('click', e=>{
+  if(!e.target.closest('[data-fk-person]')&&!e.target.closest('[id$="_dd"]')){
+    document.querySelectorAll('[id$="_dd"]').forEach(dd=>dd.style.display='none');
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
+// DMS — Upload-Enhancement
 // ════════════════════════════════════════════════════════════════
 function dmsEnhanceIframe() {
+  // Das DMS läuft auf dfedorov12.github.io — cross-origin.
+  // Same-origin DOM-Zugriff funktioniert nur wenn DMS auf gleicher Domain deployt ist.
   try {
     const iframe = document.getElementById('dms-iframe');
     if (!iframe) return;
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return;
+    if (!doc) { dbg('DMS: cross-origin – Multi-Upload muss im DMS-Quellcode aktiviert werden (input[type=file multiple webkitdirectory])'); return; }
     doc.querySelectorAll('input[type="file"]').forEach(inp => {
       inp.multiple = true;
-      inp.setAttribute('webkitdirectory', 'webkitdirectory');
-      inp.setAttribute('mozdirectory', '');
-      dbg('DMS: file-input erweitert', inp.id||inp.name||'(unnamed)');
+      inp.setAttribute('webkitdirectory', '');
+      dbg('DMS: file-input patched ✓', inp.id||'');
     });
-    dbg('DMS iframe enhanced ✓');
+    dbg('DMS iframe enhanced ✓ (same-origin)');
   } catch(e) {
-    // Cross-origin — kann nicht direkt auf DOM zugreifen
-    dbg('DMS enhance: cross-origin, nicht möglich', e.message);
+    dbg('DMS enhance fehlgeschlagen (cross-origin):', e.message);
   }
 }
 
