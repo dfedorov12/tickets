@@ -442,22 +442,8 @@ header{
     </div>
 
     <!-- DMS PANEL -->
-    <div class="panel" id="panel-dms" style="flex-direction:column;overflow:hidden;">
-      <!-- Upload-Toolbar -->
-      <div style="padding:8px 16px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;display:flex;align-items:center;gap:8px;">
-        <span style="font-size:12px;font-weight:600;color:var(--navy);">📤 Upload:</span>
-        <label style="cursor:pointer;padding:5px 14px;background:var(--navy);color:#fff;border-radius:6px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:5px;" title="Mehrere Dateien hochladen">
-          📄 Dateien wählen
-          <input type="file" multiple id="dms-upload-files" style="display:none;" onchange="dmsUploadFiles(event)"/>
-        </label>
-        <label style="cursor:pointer;padding:5px 14px;background:var(--navy2);color:#fff;border-radius:6px;font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:5px;" title="Ganzen Ordner hochladen">
-          📁 Ordner wählen
-          <input type="file" id="dms-upload-folder" webkitdirectory multiple style="display:none;" onchange="dmsUploadFiles(event)"/>
-        </label>
-        <span id="dms-upload-status" style="font-size:11px;color:var(--text-muted);margin-left:4px;"></span>
-        <span style="font-size:11px;color:var(--text-muted);margin-left:auto;">↓ Ordner im DMS öffnen, dann hier hochladen</span>
-      </div>
-      <iframe id="dms-iframe" src="https://dfedorov12.github.io/dms/" style="flex:1;border:none;width:100%;" allow="clipboard-write"></iframe>
+    <div class="panel" id="panel-dms" style="overflow:hidden;">
+      <iframe id="dms-iframe" src="https://dfedorov12.github.io/dms/" style="width:100%;height:100%;border:none;" allow="clipboard-write" onload="dmsEnhanceIframe()"></iframe>
     </div>
 
     <!-- PERMISSIONS PANEL -->
@@ -1034,6 +1020,8 @@ async function initTickets() {
     if (!lst) throw new Error('Liste nicht gefunden: '+(lists.value||[]).map(l=>l.displayName).join(', '));
     ticketListId = lst.id;
     dbg('Ticketliste gefunden', {listId: ticketListId, name: lst.displayName});
+    // SP now connected — rebuild Automatismen grid so all SP-dependent forms go live
+    buildAutoGrid();
     const cols = await gGet(`/sites/${ticketSiteId}/lists/${ticketListId}/columns?$top=200`);
     (cols.value||[]).forEach(c=>{
       if(!c.readOnly) ticketCols[c.name]=c.displayName;
@@ -1146,17 +1134,13 @@ function startTicketPolling() {
 async function pollNewTickets() {
   if (!ticketSiteId || !ticketListId) return;
   try {
-    // Neuestes Ticket-Datum ermitteln
-    const newest = allTickets.reduce((max, t) => {
-      const d = new Date(t.createdDateTime || t.fields?.Created || 0);
-      return d > max ? d : max;
-    }, new Date(0));
-    const iso = newest.toISOString();
-    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$filter=fields/Created gt '${iso}'&$top=50&$orderby=createdDateTime desc`;
+    // Fetch the 20 most recent tickets by created date — compare by ID to detect new ones
+    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$orderby=createdDateTime desc&$top=20`;
     const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
-    const fresh = (d.value||[]).filter(t => !allTickets.find(x=>x.id===t.id));
+    const existingIds = new Set(allTickets.map(t=>t.id));
+    const fresh = (d.value||[]).filter(t => !existingIds.has(t.id));
     if (!fresh.length) return;
-    dbg(`Polling: ${fresh.length} neue Ticket(s) gefunden`);
+    dbg(`Polling: ${fresh.length} neue(s) Ticket(s) gefunden`);
     allTickets = [...fresh, ...allTickets];
     sortByCreatedDesc(allTickets);
     buildFilterOptions(allTickets);
@@ -2221,10 +2205,20 @@ async function startPermScan() {
     // ── STUFE 1: Site perms (multi-fallback) ──
     let siteMembers = '';
     try {
-      // Strategy 1: roleassignments (needs site admin)
-      const sitePerms = await spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings`);
+      // Strategy 1: roleassignments — expand Member + RoleDefinitions, then fetch users per group
+      const sitePerms = await spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings&$top=100`);
       const siteRA = sitePerms.d?.results || [];
       dbg('Stufe 1 via roleassignments', {members: siteRA.length});
+      // For each group (PrincipalType=8), load its users separately
+      for (const ra of siteRA) {
+        if (ra.Member?.PrincipalType === 8 && ra.Member.Id) {
+          try {
+            const gu = await spGet(`${permSiteUrl}/_api/web/sitegroups(${ra.Member.Id})/users?$top=100`);
+            ra.Member.Users = {results: gu.d?.results || []};
+            dbg('Gruppe '+ra.Member.Title+': '+ra.Member.Users.results.length+' User');
+          } catch(ge) { ra.Member.Users = {results:[]}; dbg('Gruppe '+ra.Member.Id+' User-Fehler', ge.message); }
+        }
+      }
       siteMembers = `<div class="perm-members" style="padding:4px 0;">${renderMembersTree(siteRA)}</div>`;
     } catch(e1) {
       dbg('Stufe 1 roleassignments 403, versuche sitegroups…');
@@ -2311,8 +2305,14 @@ async function startPermScan() {
       let libPerms = '';
       if (lib.HasUniqueRoleAssignments) {
         try {
-          const lp = await spGet(`${permSiteUrl}/_api/web/lists(guid'${lib.Id}')/roleassignments?$expand=Member,RoleDefinitionBindings`);
-          libPerms = `<div class="perm-members" style="padding:4px 0 4px 6px;">${renderMembersTree(lp.d?.results||[])}</div>`;
+          const lp = await spGet(`${permSiteUrl}/_api/web/lists(guid'${lib.Id}')/roleassignments?$expand=Member,RoleDefinitionBindings&$top=100`);
+          const lpRA = lp.d?.results||[];
+          for (const ra of lpRA) {
+            if (ra.Member?.PrincipalType===8 && ra.Member.Id) {
+              try { const gu=await spGet(`${permSiteUrl}/_api/web/sitegroups(${ra.Member.Id})/users?$top=100`); ra.Member.Users={results:gu.d?.results||[]}; } catch{}
+            }
+          }
+          libPerms = `<div class="perm-members" style="padding:4px 0 4px 6px;">${renderMembersTree(lpRA)}</div>`;
         } catch { libPerms = ''; }
       }
       const folderId = 'lib_'+lib.Id.replace(/-/g,'');
@@ -2329,8 +2329,14 @@ async function startPermScan() {
       let lp = '';
       if (lst.HasUniqueRoleAssignments) {
         try {
-          const d = await spGet(`${permSiteUrl}/_api/web/lists(guid'${lst.Id}')/roleassignments?$expand=Member,RoleDefinitionBindings`);
-          lp = `<div class="perm-members" style="padding:4px 0 4px 6px;">${renderMembersTree(d.d?.results||[])}</div>`;
+          const d = await spGet(`${permSiteUrl}/_api/web/lists(guid'${lst.Id}')/roleassignments?$expand=Member,RoleDefinitionBindings&$top=100`);
+          const dRA = d.d?.results||[];
+          for (const ra of dRA) {
+            if (ra.Member?.PrincipalType===8 && ra.Member.Id) {
+              try { const gu=await spGet(`${permSiteUrl}/_api/web/sitegroups(${ra.Member.Id})/users?$top=100`); ra.Member.Users={results:gu.d?.results||[]}; } catch{}
+            }
+          }
+          lp = `<div class="perm-members" style="padding:4px 0 4px 6px;">${renderMembersTree(dRA)}</div>`;
         } catch {}
       }
       listNodes += treeNode('📋', esc(lst.Title), uTag, lp||'<div class="tree-loading">Keine eigenen Berechtigungen</div>');
@@ -2767,22 +2773,24 @@ Notizen: ${d.notizen||'-'}`.trim();
 
 let currentAutoKey=null;
 
-// Which automations are fully wired up (form + onSubmit handler that does real work)
-const AUTO_LIVE = new Set(['onboarding','hw_anfrage','zugang','software','standortwechsel','offboarding','abwesenheit']);
+// Which automations are standalone (no SharePoint list needed)
+const AUTO_STANDALONE = new Set(['abwesenheit']);
+// All keys that have real onSubmit handlers
+const AUTO_HAS_FORM = new Set(Object.keys({})); // filled at runtime
 
 function buildAutoGrid(){
   const grid=$id('auto-grid'); grid.innerHTML='';
-  // Live entries first, planned entries after
+  const spConnected = !!(ticketSiteId && ticketListId);
   const sorted = Object.entries(AUTO_FORMS).sort((a,b)=>{
-    const aL = AUTO_LIVE.has(a[0]) ? 0 : 1;
-    const bL = AUTO_LIVE.has(b[0]) ? 0 : 1;
-    return aL - bL;
+    const aLive = AUTO_STANDALONE.has(a[0]) || spConnected;
+    const bLive = AUTO_STANDALONE.has(b[0]) || spConnected;
+    return (bLive?0:1)-(aLive?0:1);
   });
   sorted.forEach(([key,form])=>{
-    const isLive = AUTO_LIVE.has(key);
+    const isLive = AUTO_STANDALONE.has(key) || spConnected;
     const card=document.createElement('div');
     card.className='auto-card' + (isLive ? ' live' : ' planned');
-    const tagLabel = isLive ? '✓ Aktiv' : '⏳ Geplant';
+    const tagLabel = isLive ? '✓ Aktiv' : '⚠ Keine SP-Verbindung';
     card.innerHTML=`<div class="auto-card-icon">${form.icon}</div>
       <div class="auto-card-title">${esc(form.title)}</div>
       <div class="auto-card-desc">${esc(form.desc)}</div>
@@ -2870,89 +2878,27 @@ async function submitAutoForm(){
 }
 
 // ════════════════════════════════════════════════════════════════
-// DMS UPLOAD (Toolbar über dem iframe)
+// DMS — Upload-Enhancement (erweitert existierenden Upload-Button)
+// Setzt multiple + webkitdirectory auf alle file-inputs im DMS-iframe
+// Funktioniert nur wenn DMS same-origin oder CORS erlaubt
 // ════════════════════════════════════════════════════════════════
-let _dmsDriveId = null;
-
-async function dmsGetDrive() {
-  if (_dmsDriveId) return _dmsDriveId;
-  const site = await gGet(`/sites/${TICKET_SITE}`);
-  const drives = await gGet(`/sites/${site.id}/drives?$top=10`);
-  // Prefer "Freigegebene Dokumente" / "Documents"
-  const drv = (drives.value||[]).find(d=>/dokumente|documents|shared/i.test(d.name))
-           || (drives.value||[])[0];
-  if (!drv) throw new Error('Keine Dokumentenbibliothek gefunden');
-  _dmsDriveId = drv.id;
-  return _dmsDriveId;
-}
-
-async function dmsUploadFiles(e) {
-  const files = Array.from(e.target.files||[]);
-  e.target.value = '';
-  if (!files.length) return;
-  const status = $id('dms-upload-status');
-  status.textContent = `⬆ Verbinde…`;
-  status.style.color = 'var(--navy)';
-  let driveId;
+function dmsEnhanceIframe() {
   try {
-    driveId = await dmsGetDrive();
-  } catch(err) {
-    status.textContent = '⚠ '+err.message;
-    status.style.color = 'var(--red)';
-    return;
+    const iframe = document.getElementById('dms-iframe');
+    if (!iframe) return;
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) return;
+    doc.querySelectorAll('input[type="file"]').forEach(inp => {
+      inp.multiple = true;
+      inp.setAttribute('webkitdirectory', 'webkitdirectory');
+      inp.setAttribute('mozdirectory', '');
+      dbg('DMS: file-input erweitert', inp.id||inp.name||'(unnamed)');
+    });
+    dbg('DMS iframe enhanced ✓');
+  } catch(e) {
+    // Cross-origin — kann nicht direkt auf DOM zugreifen
+    dbg('DMS enhance: cross-origin, nicht möglich', e.message);
   }
-  let ok=0, fail=0;
-  for (const file of files) {
-    const relPath = file.webkitRelativePath || file.name;
-    status.textContent = `⬆ ${ok+fail+1}/${files.length}: ${file.name}`;
-    try {
-      const tok = await getToken();
-      // For files > 4 MB use upload session; otherwise direct PUT
-      if (file.size > 4*1024*1024) {
-        // Create upload session
-        const sessionRes = await fetch(
-          `https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${encodeURIComponent(relPath)}:/createUploadSession`,
-          { method:'POST', headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
-            body: JSON.stringify({item:{'@microsoft.graph.conflictBehavior':'rename'}}) }
-        );
-        if (!sessionRes.ok) throw new Error('Session: '+sessionRes.status);
-        const {uploadUrl} = await sessionRes.json();
-        // Upload in 10 MB chunks
-        const chunkSize = 10*1024*1024;
-        let start = 0;
-        while (start < file.size) {
-          const end = Math.min(start+chunkSize, file.size);
-          const chunk = file.slice(start, end);
-          const r = await fetch(uploadUrl, {
-            method:'PUT',
-            headers:{'Content-Range':`bytes ${start}-${end-1}/${file.size}`,'Content-Length':String(end-start)},
-            body: chunk
-          });
-          if (!r.ok && r.status !== 202) throw new Error('Chunk: '+r.status);
-          start = end;
-        }
-      } else {
-        const r = await fetch(
-          `https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${encodeURIComponent(relPath)}:/content`,
-          { method:'PUT', headers:{Authorization:'Bearer '+tok,'Content-Type':file.type||'application/octet-stream'}, body:file }
-        );
-        if (!r.ok) throw new Error(await r.text().catch(()=>r.status));
-      }
-      ok++;
-    } catch(err) {
-      fail++;
-      dbg('DMS Upload Fehler: '+file.name, err.message);
-    }
-  }
-  const msg = ok
-    ? `✓ ${ok} Datei${ok===1?'':'en'} hochgeladen${fail?', '+fail+' fehlgeschlagen':''}`
-    : `⚠ ${fail} Upload${fail===1?'':'-Fehler'}`;
-  status.textContent = msg;
-  status.style.color = ok ? 'var(--green)' : 'var(--red)';
-  setTimeout(()=>{ if(status.textContent===msg) status.textContent=''; }, 6000);
-  // Reload iframe so the new files appear
-  const iframe = $id('dms-iframe');
-  if (iframe && ok) { iframe.src = iframe.src; }
 }
 
 // ════════════════════════════════════════════════════════════════
