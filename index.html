@@ -262,6 +262,20 @@ header{
 .perm-spinner{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--navy);border-radius:50%;animation:spin .8s linear infinite;display:inline-block;}
 .collapsed{display:none !important;}
 
+/* DMS */
+.dms-lib-card{display:flex;align-items:center;gap:14px;padding:16px 18px;background:#fff;border:1.5px solid var(--border);border-radius:10px;cursor:pointer;transition:all .15s;}
+.dms-lib-card:hover{border-color:var(--navy);box-shadow:var(--shadow);transform:translateY(-1px);}
+.dms-bc-item{color:var(--blue);cursor:pointer;font-size:13px;font-weight:600;}
+.dms-bc-item:hover{text-decoration:underline;}
+.dms-bc-sep{color:var(--text-muted);font-size:11px;margin:0 2px;}
+.dms-bc-current{font-weight:700;color:var(--navy);font-size:13px;}
+
+/* AUTOMATIONEN grayed */
+.auto-card.disabled{opacity:.45;pointer-events:none;filter:grayscale(.6);}
+.auto-card-live{position:absolute;top:14px;right:14px;font-size:9px;font-weight:700;padding:2px 8px;border-radius:10px;text-transform:uppercase;}
+.auto-card-live.tag-live{background:var(--green-bg);color:var(--green);}
+.auto-card-live.tag-planned{background:rgba(107,114,128,.1);color:#6b7280;}
+
 /* TREE */
 .tree{padding:0;margin:0;}
 .tree-node{border-left:2px solid var(--border);margin-left:12px;padding-left:14px;}
@@ -399,7 +413,7 @@ header{
     </div>
 
     <!-- DEVICES PANEL (Azure Geräte) -->
-    <div class="panel" id="panel-devices" style="display:none;flex-direction:column;">
+    <div class="panel" id="panel-devices">
       <div class="tkt-toolbar">
         <input class="tkt-search" id="dev-search" placeholder="🔍 Gerät suchen…" oninput="filterDevices()" style="flex:1;max-width:340px;"/>
         <span id="dev-count" style="font-size:11px;color:var(--text-muted);margin-left:4px;white-space:nowrap;"></span>
@@ -428,8 +442,41 @@ header{
     </div>
 
     <!-- DMS PANEL -->
-    <div class="panel" id="panel-dms" style="overflow:hidden;">
-      <iframe id="dms-iframe" src="https://dfedorov12.github.io/dms/" style="width:100%;height:100%;border:none;" allow="clipboard-write"></iframe>
+    <div class="panel" id="panel-dms" style="flex-direction:column;overflow:hidden;">
+      <!-- DMS Toolbar -->
+      <div class="tkt-toolbar" style="flex-direction:column;align-items:flex-start;gap:8px;padding:12px 20px;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:8px;width:100%;flex-wrap:wrap;">
+          <div id="dms-breadcrumb" style="flex:1;font-size:13px;color:var(--navy);display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0;"></div>
+          <span id="dms-status" style="font-size:11px;color:var(--text-muted);white-space:nowrap;"></span>
+          <button class="hdr-btn" id="dms-sel-btn" title="SharePoint-Auswahlmodus (Mehrfachauswahl)" onclick="dmsToggleSelectMode()">☑ Auswahl</button>
+          <label class="hdr-btn primary" style="cursor:pointer;" title="Mehrere Dateien hochladen">
+            📤 Dateien
+            <input type="file" multiple id="dms-upload-files" style="display:none;" onchange="dmsUpload(event)"/>
+          </label>
+          <label class="hdr-btn" style="cursor:pointer;" title="Ganzen Ordner hochladen">
+            📁 Ordner
+            <input type="file" id="dms-upload-folder" webkitdirectory multiple style="display:none;" onchange="dmsUpload(event)"/>
+          </label>
+          <button class="hdr-btn" onclick="loadDMS(true)" title="Neu laden">🔄</button>
+        </div>
+        <!-- Selection Action Bar (nur sichtbar wenn Elemente ausgewählt) -->
+        <div id="dms-sel-bar" style="display:none;align-items:center;gap:8px;padding:6px 14px;background:var(--navy);color:#fff;border-radius:7px;width:100%;">
+          <span id="dms-sel-count" style="font-size:12px;font-weight:700;flex:1;"></span>
+          <button onclick="dmsDeleteSelected()" style="padding:4px 14px;background:var(--red);color:#fff;border:none;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;">🗑 Löschen</button>
+          <button onclick="dmsDeselectAll()" style="padding:4px 14px;background:rgba(255,255,255,.18);color:#fff;border:none;border-radius:5px;font-size:11px;cursor:pointer;">✕ Abwählen</button>
+        </div>
+      </div>
+      <!-- DMS Content -->
+      <div style="flex:1;overflow:auto;" id="dms-content">
+        <div class="empty" id="dms-empty-msg">Lade Dokumentbibliotheken…</div>
+        <div id="dms-lib-grid" style="display:none;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;padding:20px;"></div>
+        <table class="tkt-table" id="dms-table" style="display:none;">
+          <thead>
+            <tr id="dms-thead"></tr>
+          </thead>
+          <tbody id="dms-tbody"></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- PERMISSIONS PANEL -->
@@ -800,6 +847,7 @@ function showPanel(id) {
   $id('btn-refresh').style.display = id==='tickets' ? '' : 'none';
   if (id==='reports' && allTickets.length) buildReports();
   if (id==='devices' && !allDevices.length) loadDevices();
+  if (id==='dms') loadDMS();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -2050,7 +2098,34 @@ function renderMembersTree(roleAssignments) {
       .map(r=>r.Name).filter(r=>r!=='Limited Access'&&r!=='Beschränkter Zugriff').join(', ');
     if (!roles) return '';
     const ri = roleIcon(roles);
-    const type = member.PrincipalType===8?'👥':(member.PrincipalType===1?'👤':'🔑');
+    const isGroup = member.PrincipalType===8;
+    const type = isGroup?'👥':(member.PrincipalType===1?'👤':'🔑');
+    const memberId = 'grp_'+Math.random().toString(36).slice(2);
+    const users = member.Users?.results||[];
+    // For groups: render expandable
+    if (isGroup) {
+      const usersHtml = users.length
+        ? users.map(u=>`<div class="perm-member" style="margin-left:4px;background:var(--bg2);">
+            <div class="perm-member-icon" style="background:#6b7280;font-size:9px;">👤</div>
+            <span class="perm-member-name" style="font-size:11px;">${esc(u.Title||u.LoginName||'?')}</span>
+            <span class="perm-member-role" style="font-size:9px;">${esc(u.LoginName||'')}</span>
+          </div>`).join('')
+        : `<div style="font-size:11px;color:var(--text-muted);padding:4px 10px;">Keine Mitglieder geladen</div>`;
+      return `<div class="perm-member" style="flex-direction:column;align-items:stretch;gap:0;padding:0;border:1px solid var(--border);border-radius:7px;overflow:hidden;margin-bottom:4px;">
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;background:#fff;" onclick="toggleTree('${memberId}')">
+          <div class="perm-member-icon" style="background:${ri.bg};">${ri.icon}</div>
+          <span style="font-size:13px;">${type}</span>
+          <span class="perm-member-name">${esc(member.Title||member.LoginName||'?')}</span>
+          <span class="perm-member-role">${esc(roles)}</span>
+          ${users.length?`<span style="font-size:9px;color:var(--text-muted);margin-left:auto;padding:2px 7px;background:var(--bg);border-radius:4px;">${users.length} Mitglieder</span>`:''}
+          <span class="tree-toggle" id="tg_${memberId}" style="margin-left:auto;">▶</span>
+        </div>
+        <div id="${memberId}" style="display:none;border-top:1px solid var(--border);padding:6px 8px;background:var(--bg);display:flex;flex-direction:column;gap:3px;">
+          ${usersHtml}
+        </div>
+      </div>`;
+    }
+    // Users/service accounts: plain row
     return `<div class="perm-member">
       <div class="perm-member-icon" style="background:${ri.bg};">${ri.icon}</div>
       <span>${type}</span>
@@ -2080,7 +2155,9 @@ function toggleTree(id) {
   const tg = $id('tg_'+id);
   if (!el) return;
   const open = el.style.display !== 'none';
-  el.style.display = open ? 'none' : 'block';
+  // Use flex for perm-member rows, block for tree-children
+  const isFlex = el.classList.contains('perm-members') || el.style.flexDirection||el.dataset.flex;
+  el.style.display = open ? 'none' : (isFlex ? 'flex' : 'block');
   if (tg) tg.classList.toggle('open', !open);
 }
 
@@ -2132,13 +2209,23 @@ async function startPermScan() {
           const icon = g.Title?.includes('Besitzer') || g.Title?.includes('Owner') ? '👑' :
                        g.Title?.includes('Mitglieder') || g.Title?.includes('Member') ? '✏️' : '👁️';
           const bg = icon === '👑' ? 'var(--red)' : icon === '✏️' ? 'var(--yellow)' : 'var(--green)';
-          siteMembers += `<div class="perm-member" style="flex-direction:column;align-items:flex-start;gap:4px;padding:8px 10px;">
-            <div style="display:flex;align-items:center;gap:6px;">
+          const gId = 'sg_'+Math.random().toString(36).slice(2);
+          const usersHtml = users.length
+            ? users.map(u=>`<div class="perm-member" style="margin-left:4px;background:var(--bg2);">
+                <div class="perm-member-icon" style="background:#6b7280;font-size:9px;">👤</div>
+                <span class="perm-member-name" style="font-size:11px;">${esc(u.Title||u.LoginName||'?')}</span>
+              </div>`).join('')
+            : `<div style="font-size:11px;color:var(--text-muted);padding:4px 10px;">Keine Mitglieder</div>`;
+          siteMembers += `<div class="perm-member" style="flex-direction:column;align-items:stretch;gap:0;padding:0;border:1px solid var(--border);border-radius:7px;overflow:hidden;margin-bottom:4px;">
+            <div style="display:flex;align-items:center;gap:6px;padding:7px 10px;cursor:pointer;background:#fff;" onclick="toggleTree('${gId}')">
               <div class="perm-member-icon" style="background:${bg};">${icon}</div>
               <span class="perm-member-name">👥 ${esc(g.Title)}</span>
               <span class="perm-member-role">${users.length} Mitglieder</span>
+              <span class="tree-toggle" id="tg_${gId}" style="margin-left:auto;">▶</span>
             </div>
-            ${users.length ? `<div style="padding-left:30px;font-size:11px;color:var(--text-dim);">${users.map(u=>'👤 '+esc(u.Title||u.LoginName)).join('<br>')}</div>` : ''}
+            <div id="${gId}" style="display:none;border-top:1px solid var(--border);padding:6px 8px;background:var(--bg);flex-direction:column;gap:3px;">
+              ${usersHtml}
+            </div>
           </div>`;
         });
         siteMembers += `</div>`;
@@ -2335,6 +2422,7 @@ async function loadFolderPermsTree() {
 // ════════════════════════════════════════════════════════════════
 const AUTO_FORMS = {
   onboarding:{
+    live:true,
     title:'👋 Onboarding',tag:'Neuer Mitarbeiter',icon:'👋',
     desc:'Neuen Mitarbeiter einrichten — AD, E-Mail, Teams, Lizenzen, Hardware',
     sections:[
@@ -2385,6 +2473,7 @@ const AUTO_FORMS = {
     }
   },
   hw_anfrage:{
+    live:true,
     title:'🖥️ Hardware-Anfrage',tag:'Bestellung',icon:'🖥️',
     desc:'Neue Hardware bestellen — Laptop, Monitor, Peripherie',
     sections:[
@@ -2419,6 +2508,7 @@ const AUTO_FORMS = {
     }
   },
   zugang:{
+    live:true,
     title:'🔑 Zugangsanfrage',tag:'Berechtigung',icon:'🔑',
     desc:'VPN, Systeme, SharePoint-Sites, Laufwerke beantragen',
     sections:[
@@ -2450,6 +2540,7 @@ const AUTO_FORMS = {
     }
   },
   software:{
+    live:false,
     title:'📊 Software-Anfrage',tag:'Lizenz',icon:'📊',
     desc:'Software-Lizenzen beantragen — Office, Spezial-Software',
     sections:[
@@ -2478,6 +2569,7 @@ const AUTO_FORMS = {
     }
   },
   standortwechsel:{
+    live:false,
     title:'🏢 Standortwechsel',tag:'IT-Umzug',icon:'🏢',
     desc:'Arbeitsplatz-Umzug planen — Drucker, Netzwerk, Telefon',
     sections:[
@@ -2510,6 +2602,7 @@ const AUTO_FORMS = {
     }
   },
   offboarding:{
+    live:true,
     title:'🚪 Offboarding',tag:'Mitarbeiter-Austritt',icon:'🚪',
     desc:'Mitarbeiter-Austritt verwalten, Zugänge sperren, Hardware zurückfordern',
     sections:[
@@ -2577,6 +2670,7 @@ Notizen: ${d.notizen||'-'}`.trim();
     }
   },
   abwesenheit:{
+    live:true,
     title:'📅 Abwesenheitsnotiz',tag:'Formular',icon:'📅',
     desc:'Automatische Abwesenheitsnotiz für Outlook konfigurieren und einrichten',
     sections:[
@@ -2652,13 +2746,20 @@ let currentAutoKey=null;
 
 function buildAutoGrid(){
   const grid=$id('auto-grid'); grid.innerHTML='';
-  Object.entries(AUTO_FORMS).forEach(([key,form])=>{
-    const card=document.createElement('div'); card.className='auto-card';
-    card.innerHTML=`<div class="auto-card-icon">${form.icon}</div>
+  // Sort: live first, then disabled
+  const entries = Object.entries(AUTO_FORMS).sort((a,b)=>(b[1].live===true?1:0)-(a[1].live===true?1:0));
+  entries.forEach(([key,form])=>{
+    const isLive = form.live === true;
+    const card=document.createElement('div');
+    card.className='auto-card' + (isLive ? '' : ' disabled');
+    const liveTag = isLive
+      ? `<div class="auto-card-live tag-live">✓ Aktiv</div>`
+      : `<div class="auto-card-live tag-planned">⏳ Geplant</div>`;
+    card.innerHTML=`${liveTag}
+      <div class="auto-card-icon">${form.icon}</div>
       <div class="auto-card-title">${esc(form.title)}</div>
-      <div class="auto-card-desc">${esc(form.desc)}</div>
-      <div class="auto-card-tag">${esc(form.tag)}</div>`;
-    card.onclick=()=>openAutoForm(key);
+      <div class="auto-card-desc">${esc(form.desc)}</div>`;
+    if(isLive) card.onclick=()=>openAutoForm(key);
     grid.appendChild(card);
   });
 }
@@ -2738,6 +2839,282 @@ async function submitAutoForm(){
   }
   try{ await form.onSubmit(data); closeAutoModal(); }
   catch(e){ toast('Fehler: '+e.message,'error'); }
+}
+
+// ════════════════════════════════════════════════════════════════
+// DMS — SharePoint Dokumentenverwaltung
+// ════════════════════════════════════════════════════════════════
+let dmsSiteId = null, dmsDriveId = null, dmsPath = [], dmsItems = [];
+let dmsSelectedIds = new Set(), dmsSelectionMode = false;
+
+async function loadDMS(force) {
+  if (dmsSiteId && !force && !dmsDriveId) return; // already on lib view
+  if (force) { dmsSiteId=null; dmsDriveId=null; dmsPath=[]; dmsSelectedIds.clear(); }
+  $id('dms-status').textContent = 'Lade…';
+  $id('dms-empty-msg').style.display='block';
+  $id('dms-empty-msg').textContent='Lade Dokumentbibliotheken…';
+  $id('dms-lib-grid').style.display='none';
+  $id('dms-table').style.display='none';
+  dmsRenderBreadcrumb();
+  try {
+    if (!dmsSiteId) {
+      const site = await gGet(`/sites/${TICKET_SITE}`);
+      dmsSiteId = site.id;
+    }
+    const drives = await gGet(`/sites/${dmsSiteId}/drives?$top=20`);
+    const driveList = drives.value||[];
+    $id('dms-status').textContent = driveList.length + ' Bibliotheken';
+    $id('dms-empty-msg').style.display='none';
+    const grid = $id('dms-lib-grid');
+    grid.innerHTML = driveList.map(d=>`
+      <div class="dms-lib-card" onclick="dmsSwitchDrive('${esc(d.id)}','${esc(d.name)}')">
+        <span style="font-size:28px;">📚</span>
+        <div>
+          <div style="font-weight:700;color:var(--navy);font-size:14px;">${esc(d.name)}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Dokumentbibliothek</div>
+        </div>
+      </div>`).join('');
+    grid.style.display='grid';
+    dmsDriveId = null; dmsPath = [];
+  } catch(e) {
+    $id('dms-status').textContent='⚠ '+e.message;
+    $id('dms-empty-msg').style.display='block';
+    $id('dms-empty-msg').textContent='⚠ '+e.message;
+    $id('dms-empty-msg').style.color='var(--red)';
+  }
+}
+
+async function dmsSwitchDrive(driveId, name) {
+  dmsDriveId = driveId;
+  dmsPath = [{id:'root', name}];
+  dmsSelectedIds.clear();
+  await dmsLoadFolder('root');
+}
+
+async function dmsLoadFolder(itemId) {
+  $id('dms-lib-grid').style.display='none';
+  $id('dms-table').style.display='none';
+  $id('dms-empty-msg').style.display='block';
+  $id('dms-empty-msg').textContent='Lade…';
+  $id('dms-empty-msg').style.color='';
+  $id('dms-status').textContent='Lade…';
+  try {
+    const url = itemId==='root'
+      ? `/drives/${dmsDriveId}/root/children?$orderby=name&$top=200`
+      : `/drives/${dmsDriveId}/items/${itemId}/children?$orderby=name&$top=200`;
+    const d = await gGet(url);
+    dmsItems = d.value||[];
+    dmsRenderBreadcrumb();
+    dmsRenderTable();
+    $id('dms-status').textContent = dmsItems.length + ' Einträge';
+  } catch(e) {
+    $id('dms-empty-msg').style.display='block';
+    $id('dms-empty-msg').textContent='⚠ '+e.message;
+    $id('dms-empty-msg').style.color='var(--red)';
+    $id('dms-status').textContent='⚠ Fehler';
+  }
+}
+
+function dmsRenderBreadcrumb() {
+  const bc = $id('dms-breadcrumb');
+  if (!bc) return;
+  if (!dmsPath.length) {
+    bc.innerHTML = '<span class="dms-bc-current">📄 Dokumentenverwaltung</span>';
+    return;
+  }
+  let parts = dmsPath.map((p,i) => {
+    if (i===dmsPath.length-1)
+      return `<span class="dms-bc-current">${esc(p.name)}</span>`;
+    if (i===0)
+      return `<span class="dms-bc-item" onclick="loadDMS()">📄 DMS</span>
+              <span class="dms-bc-sep">›</span>
+              <span class="dms-bc-item" onclick="dmsNavTo(${i})">${esc(p.name)}</span>`;
+    return `<span class="dms-bc-sep">›</span><span class="dms-bc-item" onclick="dmsNavTo(${i})">${esc(p.name)}</span>`;
+  });
+  bc.innerHTML = `<span class="dms-bc-item" onclick="loadDMS()" title="Bibliotheken">📚</span><span class="dms-bc-sep">›</span>` + parts.join('');
+}
+
+async function dmsNavTo(index) {
+  dmsPath = dmsPath.slice(0, index+1);
+  dmsSelectedIds.clear();
+  const item = dmsPath[dmsPath.length-1];
+  await dmsLoadFolder(item.id);
+}
+
+function dmsRenderTable() {
+  const tbody = $id('dms-tbody');
+  const thead = $id('dms-thead');
+  if (!tbody || !thead) return;
+  $id('dms-empty-msg').style.display = dmsItems.length ? 'none' : 'block';
+  if (!dmsItems.length) {
+    $id('dms-empty-msg').textContent='Ordner ist leer';
+    $id('dms-table').style.display='none';
+    return;
+  }
+  const selCol = dmsSelectionMode ? '<th style="width:36px;padding:8px 6px;"><input type="checkbox" id="dms-chk-all" onchange="dmsSelectAll(this.checked)"/></th>' : '';
+  thead.innerHTML = `${selCol}<th>Name</th><th>Größe</th><th>Geändert</th><th>Von</th><th style="width:80px;"></th>`;
+
+  const sorted = [...dmsItems].sort((a,b)=>{
+    if(!!a.folder!==!!b.folder) return a.folder?-1:1;
+    return (a.name||'').localeCompare(b.name||'','de');
+  });
+
+  tbody.innerHTML = sorted.map(it=>{
+    const isFolder=!!it.folder;
+    const icon = isFolder ? '📁' : dmsFileIcon(it.name);
+    const size = isFolder
+      ? `<span style="font-size:10px;color:var(--text-muted);">${it.folder.childCount} Eintr.</span>`
+      : dmsFormatBytes(it.size||0);
+    const mod = it.lastModifiedDateTime
+      ? new Date(it.lastModifiedDateTime).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit'})
+      : '';
+    const by = esc(it.lastModifiedBy?.user?.displayName||'');
+    const checked = dmsSelectedIds.has(it.id)?'checked':'';
+    const selCell = dmsSelectionMode
+      ? `<td style="width:36px;padding:8px 6px;"><input type="checkbox" ${checked} onchange="dmsToggleItem('${esc(it.id)}',this.checked)" onclick="event.stopPropagation()"/></td>`
+      : '';
+    const action = !isFolder && it.webUrl
+      ? `<a href="${esc(it.webUrl)}" target="_blank" onclick="event.stopPropagation()" style="font-size:10px;color:var(--blue);padding:2px 8px;border:1px solid var(--border);border-radius:4px;text-decoration:none;white-space:nowrap;">↗ Öffnen</a>`
+      : '';
+    return `<tr class="clickable" data-dms-id="${esc(it.id)}">
+      ${selCell}
+      <td style="font-weight:${isFolder?'600':'400'};"><span style="margin-right:7px;">${icon}</span>${esc(it.name)}</td>
+      <td style="font-size:11px;color:var(--text-muted);">${size}</td>
+      <td style="font-size:11px;color:var(--text-muted);">${mod}</td>
+      <td style="font-size:11px;color:var(--text-muted);">${by}</td>
+      <td style="text-align:right;">${action}</td>
+    </tr>`;
+  }).join('');
+
+  // Attach click handlers via JS (avoids inline template literal issues)
+  setTimeout(()=>{
+    $id('dms-tbody').querySelectorAll('tr.clickable').forEach(tr=>{
+      const id=tr.dataset.dmsId;
+      const it=dmsItems.find(x=>x.id===id);
+      if(!it) return;
+      tr.onclick=e=>{
+        if(e.target.type==='checkbox') return;
+        if(it.folder) dmsOpenFolder(it.id,it.name);
+        else if(it.webUrl) dmsOpenFile(it.id);
+      };
+    });
+  },0);
+
+  $id('dms-table').style.display='';
+}
+
+function dmsOpenFolder(id, name) {
+  dmsPath.push({id, name});
+  dmsSelectedIds.clear();
+  dmsLoadFolder(id);
+}
+
+function dmsOpenFile(id) {
+  const it = dmsItems.find(i=>i.id===id);
+  if (it?.webUrl) window.open(it.webUrl,'_blank');
+}
+
+function dmsToggleItem(id, checked) {
+  if(checked) dmsSelectedIds.add(id); else dmsSelectedIds.delete(id);
+  dmsUpdateSelBar();
+}
+
+function dmsSelectAll(checked) {
+  dmsItems.forEach(it=>{ if(checked) dmsSelectedIds.add(it.id); else dmsSelectedIds.delete(it.id); });
+  dmsRenderTable();
+  dmsUpdateSelBar();
+}
+
+function dmsDeselectAll() {
+  dmsSelectedIds.clear();
+  const all=$id('dms-chk-all'); if(all) all.checked=false;
+  dmsRenderTable();
+  dmsUpdateSelBar();
+}
+
+function dmsUpdateSelBar() {
+  const bar=$id('dms-sel-bar'); if(!bar) return;
+  const n=dmsSelectedIds.size;
+  bar.style.display=(dmsSelectionMode&&n>0)?'flex':'none';
+  const c=$id('dms-sel-count'); if(c) c.textContent=n+' ausgewählt';
+}
+
+function dmsToggleSelectMode() {
+  dmsSelectionMode=!dmsSelectionMode;
+  dmsSelectedIds.clear();
+  const btn=$id('dms-sel-btn');
+  if(btn){
+    btn.textContent=dmsSelectionMode?'☑ Auswahl: An':'☑ Auswahl';
+    btn.style.background=dmsSelectionMode?'var(--navy)':'';
+    btn.style.color=dmsSelectionMode?'#fff':'';
+    btn.style.borderColor=dmsSelectionMode?'var(--navy)':'';
+  }
+  if(dmsDriveId) dmsRenderTable();
+  dmsUpdateSelBar();
+}
+
+async function dmsDeleteSelected() {
+  if(!dmsSelectedIds.size) return;
+  if(!confirm(`${dmsSelectedIds.size} Element(e) wirklich löschen?`)) return;
+  let ok=0,fail=0;
+  for(const id of dmsSelectedIds){
+    try{
+      const tok=await getToken();
+      const r=await fetch(`${API}/drives/${dmsDriveId}/items/${id}`,{method:'DELETE',headers:{Authorization:'Bearer '+tok}});
+      if(r.status===204) ok++; else throw new Error(r.status);
+    } catch{ fail++; }
+  }
+  dmsSelectedIds.clear();
+  toast(ok?`✓ ${ok} gelöscht${fail?', '+fail+' Fehler':''}` : `⚠ ${fail} Fehler`,ok?'success':'error');
+  await dmsLoadFolder(dmsPath.length?dmsPath[dmsPath.length-1].id:'root');
+}
+
+async function dmsUpload(e) {
+  const files=Array.from(e.target.files||[]);
+  if(!files.length||!dmsDriveId){
+    if(!dmsDriveId) toast('Bitte zuerst eine Bibliothek öffnen','error');
+    return;
+  }
+  const folderId=dmsPath.length?dmsPath[dmsPath.length-1].id:'root';
+  let ok=0,fail=0;
+  toast(`⬆ ${files.length} Datei(en) werden hochgeladen…`,'');
+  for(const file of files){
+    try{
+      const tok=await getToken();
+      // Preserve relative path for folder uploads
+      const relPath=file.webkitRelativePath||file.name;
+      const uploadUrl=folderId==='root'
+        ?`${API}/drives/${dmsDriveId}/root:/${encodeURIComponent(relPath)}:/content`
+        :`${API}/drives/${dmsDriveId}/items/${folderId}:/${encodeURIComponent(relPath)}:/content`;
+      const r=await fetch(uploadUrl,{
+        method:'PUT',
+        headers:{Authorization:'Bearer '+tok,'Content-Type':file.type||'application/octet-stream'},
+        body:file
+      });
+      if(!r.ok) throw new Error(await r.text().catch(()=>r.status));
+      ok++;
+    } catch(err){ fail++; dbg('DMS Upload Fehler',err.message); }
+  }
+  e.target.value='';
+  toast(ok?`✓ ${ok} Datei(en) hochgeladen${fail?', '+fail+' Fehler':''}`:
+    `⚠ ${fail} Upload-Fehler(n)`,ok?'success':'error');
+  await dmsLoadFolder(folderId==='root'?'root':dmsPath[dmsPath.length-1].id);
+}
+
+function dmsFileIcon(name){
+  const ext=(name||'').split('.').pop().toLowerCase();
+  const m={pdf:'📄',doc:'📝',docx:'📝',xls:'📊',xlsx:'📊',ppt:'📊',pptx:'📊',
+    jpg:'🖼️',jpeg:'🖼️',png:'🖼️',gif:'🖼️',svg:'🖼️',mp4:'🎬',mp3:'🎵',
+    zip:'🗜️',rar:'🗜️','7z':'🗜️',txt:'📋',csv:'📊',json:'{}',xml:'📋',
+    html:'🌐',htm:'🌐',js:'📜',ts:'📜',py:'🐍',msg:'✉️',eml:'✉️'};
+  return m[ext]||'📎';
+}
+
+function dmsFormatBytes(b){
+  if(b<1024) return b+' B';
+  if(b<1024*1024) return (b/1024).toFixed(1)+' KB';
+  if(b<1024*1024*1024) return (b/1024/1024).toFixed(1)+' MB';
+  return (b/1024/1024/1024).toFixed(1)+' GB';
 }
 
 // ════════════════════════════════════════════════════════════════
