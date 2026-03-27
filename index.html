@@ -546,6 +546,24 @@ const fieldStr = v => {
 const fmt = s => s ? new Date(s).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit'}) : '';
 const fmtFull = s => s ? new Date(s).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
 
+// Strip read-only / system fields before PATCH
+const READONLY_FIELDS = new Set([
+  'AppAuthorLookupId','AppEditorLookupId','AuthorLookupId','EditorLookupId',
+  'Author','Editor','Created','Modified','_UIVersionString','ContentType',
+  'Attachments','ID','id','LinkTitleNoMenu','LinkTitle',
+  'ItemChildCount','FolderChildCount','ComplianceAssetId',
+  'OData__ColorTag','@odata.etag'
+]);
+function stripReadOnly(fields) {
+  const clean = {};
+  Object.entries(fields).forEach(([k,v]) => {
+    if (!READONLY_FIELDS.has(k) && !k.startsWith('@odata') && !k.startsWith('_') && v !== undefined) {
+      clean[k] = v;
+    }
+  });
+  return clean;
+}
+
 // Extract display name from email or person field
 function personName(v) {
   if (!v) return '';
@@ -1434,8 +1452,10 @@ async function changeStatusFs(id, newStatus) {
 
 async function saveFullscreen() {
   if (!fullscreenId) return;
-  const fields={};
-  $id('fs-body').querySelectorAll('[data-fk]').forEach(el=>{ if(el.value) fields[el.dataset.fk]=el.value; });
+  const raw={};
+  $id('fs-body').querySelectorAll('[data-fk]').forEach(el=>{ if(el.value) raw[el.dataset.fk]=el.value; });
+  const fields = stripReadOnly(raw);
+  dbg('saveFullscreen', {id: fullscreenId, fieldCount: Object.keys(fields).length, keys: Object.keys(fields)});
   try {
     await gPatch(`/sites/${ticketSiteId}/lists/${ticketListId}/items/${fullscreenId}/fields`, fields);
     const it=allTickets.find(t=>t.id==fullscreenId);
@@ -1484,8 +1504,10 @@ async function changeStatus(id, newStatus) {
 }
 
 async function saveSidebar(id) {
-  const fields={};
-  $id('sb-body').querySelectorAll('[data-fk]').forEach(el=>{ fields[el.dataset.fk]=el.value; });
+  const raw={};
+  $id('sb-body').querySelectorAll('[data-fk]').forEach(el=>{ raw[el.dataset.fk]=el.value; });
+  const fields = stripReadOnly(raw);
+  dbg('saveSidebar', {id, fieldCount: Object.keys(fields).length, keys: Object.keys(fields)});
   try {
     await gPatch(`/sites/${ticketSiteId}/lists/${ticketListId}/items/${id}/fields`, fields);
     // Update local cache
@@ -1787,14 +1809,21 @@ async function loadDevices(force) {
       (cols.value||[]).forEach(c=>{ if(!c.readOnly) devCols[c.name]=c.displayName; });
       dbg('Geräte: Spalten', Object.keys(devCols));
     }
-    // Load items
+    // Load items with Prefer header for large lists
+    dbg('Geräte: Lade Items…');
     let url = `/sites/${devSiteId}/lists/${devListId}/items?$expand=fields&$top=100`;
     while (url) {
-      const d = await gGet(url);
-      allDevices = [...allDevices, ...(d.value||[])];
+      const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
+      const page = d.value||[];
+      dbg('Geräte: Batch empfangen', {items: page.length});
+      allDevices = [...allDevices, ...page];
       url = d['@odata.nextLink'] ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
     }
-    dbg('Geräte geladen', {anzahl: allDevices.length, spalten: Object.keys(devCols)});
+    dbg('Geräte geladen', {anzahl: allDevices.length});
+    if (!allDevices.length) {
+      $id('dev-empty').textContent='Keine Geräte in der Liste gefunden.';
+      return;
+    }
     buildDevTable();
   } catch(e) {
     dbg('Geräte FEHLER', e.message);
@@ -1910,8 +1939,9 @@ function openDevDetail(id) {
 function closeDevSidebar() { $id('dev-sidebar').classList.remove('open'); devEditingId=null; }
 
 async function saveDevSidebar(id) {
-  const fields={};
-  $id('dev-sb-body').querySelectorAll('[data-fk]').forEach(el=>{ if(el.value) fields[el.dataset.fk]=el.value; });
+  const raw={};
+  $id('dev-sb-body').querySelectorAll('[data-fk]').forEach(el=>{ if(el.value) raw[el.dataset.fk]=el.value; });
+  const fields = stripReadOnly(raw);
   try {
     await gPatch(`/sites/${devSiteId}/lists/${devListId}/items/${id}/fields`, fields);
     const it = allDevices.find(t=>t.id==id);
@@ -2081,19 +2111,54 @@ async function startPermScan() {
   try {
     const siteName = permSiteUrl.split('/').pop();
 
-    // ── STUFE 1: Site perms ──
+    // ── STUFE 1: Site perms (multi-fallback) ──
     let siteMembers = '';
     try {
+      // Strategy 1: roleassignments (needs site admin)
       const sitePerms = await spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings`);
       const siteRA = sitePerms.d?.results || [];
-      dbg('Stufe 1', {members: siteRA.length});
+      dbg('Stufe 1 via roleassignments', {members: siteRA.length});
       siteMembers = `<div class="perm-members" style="padding:4px 0;">${renderMembersTree(siteRA)}</div>`;
-    } catch(e) {
-      dbg('Stufe 1 Fehler (ggf. fehlende Berechtigung)', e.message);
-      siteMembers = `<div style="padding:10px;background:var(--red-bg);border-radius:8px;font-size:11px;color:var(--red);">
-        ⚠ Kein Zugriff auf Site-Berechtigungen (403).<br>
-        <span style="color:var(--text-dim);">Benötigt: Site Collection Admin oder Sites.FullControl.All</span>
-      </div>`;
+    } catch(e1) {
+      dbg('Stufe 1 roleassignments 403, versuche sitegroups…');
+      try {
+        // Strategy 2: sitegroups (lower perm requirement)
+        const grpData = await spGet(`${permSiteUrl}/_api/web/sitegroups?$expand=Users`);
+        const groups = grpData.d?.results || [];
+        dbg('Stufe 1 via sitegroups', {groups: groups.length});
+        siteMembers = `<div class="perm-members" style="padding:4px 0;">`;
+        groups.forEach(g => {
+          const users = g.Users?.results || [];
+          const icon = g.Title?.includes('Besitzer') || g.Title?.includes('Owner') ? '👑' :
+                       g.Title?.includes('Mitglieder') || g.Title?.includes('Member') ? '✏️' : '👁️';
+          const bg = icon === '👑' ? 'var(--red)' : icon === '✏️' ? 'var(--yellow)' : 'var(--green)';
+          siteMembers += `<div class="perm-member" style="flex-direction:column;align-items:flex-start;gap:4px;padding:8px 10px;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <div class="perm-member-icon" style="background:${bg};">${icon}</div>
+              <span class="perm-member-name">👥 ${esc(g.Title)}</span>
+              <span class="perm-member-role">${users.length} Mitglieder</span>
+            </div>
+            ${users.length ? `<div style="padding-left:30px;font-size:11px;color:var(--text-dim);">${users.map(u=>'👤 '+esc(u.Title||u.LoginName)).join('<br>')}</div>` : ''}
+          </div>`;
+        });
+        siteMembers += `</div>`;
+      } catch(e2) {
+        dbg('Stufe 1 sitegroups auch 403, versuche Graph…');
+        try {
+          // Strategy 3: Graph API — get associated groups
+          const siteInfo = await gGet(`/sites/${permSiteId}?$select=id,displayName`);
+          const graphLists = await gGet(`/sites/${permSiteId}/lists?$top=5`);
+          siteMembers = `<div style="padding:10px;background:var(--amber-bg);border-radius:8px;font-size:11px;color:var(--amber);">
+            ⚠ Eingeschränkter Zugriff — Berechtigungsdetails benötigen höhere Rechte.<br>
+            <span style="color:var(--text-dim);">Site erkannt: ${esc(siteInfo.displayName)} · ${(graphLists.value||[]).length}+ Listen sichtbar</span>
+          </div>`;
+        } catch(e3) {
+          siteMembers = `<div style="padding:10px;background:var(--red-bg);border-radius:8px;font-size:11px;color:var(--red);">
+            ⚠ Kein Zugriff auf Site-Berechtigungen.<br>
+            <span style="color:var(--text-dim);">Kontaktiere den Site-Admin für Zugriff.</span>
+          </div>`;
+        }
+      }
     }
 
     // ── STUFE 2 ──
