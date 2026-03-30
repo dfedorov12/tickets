@@ -1314,15 +1314,26 @@ function applyFilters(list) {
       &&(!st||(f[cStatus]||'').includes(st))
       &&(!kat||!cKat||(f[cKat]||'')===kat)
       &&(!wrk||!cWerk||(f[cWerk]||'')===wrk)
-      &&(!art||!cType||(f[cType]||'')===art);
+      &&(!art||(() => {
+      const _artKeys=['Art','Ticketart','TicketType'];
+      const _key=cType||_artKeys.find(k=>f[k]!=null);
+      return !_key||(f[_key]||'')===art;
+    })());
   });
 }
 
 function buildFilterOptions(tickets) {
-  const cKat  = getCol('category');
-  const cWerk = getCol('werk');
-  const cType = getCol('type');
-  const cAsgn = getCol('assigned');
+  // Find column keys by scanning actual ticket data (works even with slim cache)
+  const findKey = (candidates) => {
+    for(const k of candidates) {
+      if(tickets.some(t=>(t.fields||{})[k]!=null && (t.fields||{})[k]!=='')) return k;
+    }
+    return null;
+  };
+  const cKat  = getCol('category') || findKey(['Kategorie','Category','Typ']);
+  const cWerk = getCol('werk')     || findKey(['Werk','Standort','Site']);
+  const cType = getCol('type')     || findKey(['Art','Ticketart','TicketType']);
+  const cAsgn = getCol('assigned') || findKey(['Zugewiesen','AssignedTo','Zugewiesen_x0020_an','Bearbeiter']);
   const sets  = {kat:new Set(), werk:new Set(), art:new Set(), assigned:new Set()};
   tickets.forEach(it=>{
     const f=it.fields||{};
@@ -1336,7 +1347,7 @@ function buildFilterOptions(tickets) {
     const cur=sel.value;
     sel.innerHTML='<option value="">'+label+'</option>';
     [...set].sort().forEach(v=>{ const o=document.createElement('option'); o.value=o.textContent=v; sel.appendChild(o); });
-    sel.value=cur;
+    if([...set].includes(cur)) sel.value=cur;
   };
   fill('tkt-kat',sets.kat,'Alle Kategorien');
   fill('tkt-werk',sets.werk,'Alle Werke');
@@ -2265,15 +2276,24 @@ function buildReports() {
     </div>`;
   }
 
-  // Top-10 Zugewiesen an
-  const cAsgn = getCol('assigned');
-  if (cAsgn) {
-    const asgnData = countBy(allTickets, t=>personName((t.fields||{})[cAsgn])||'(Nicht zugewiesen)');
-    const top10 = asgnData.slice(0,10);
-    html += `<div class="rpt-card rpt-card-full">
-      <div class="rpt-title">👤 Top 10 — Zugewiesen an</div>
-      ${barChart(top10, (l)=>l==='(Nicht zugewiesen)'?'#94a3b8':'var(--navy)')}
-    </div>`;
+  // Top-10 Zugewiesen an — scan all known column names
+  const _asgnColCandidates = ['Zugewiesen','AssignedTo','Zugewiesen_x0020_an','Bearbeiter'];
+  const _asgnKey = getCol('assigned') || _asgnColCandidates.find(k=>
+    allTickets.some(t=>(t.fields||{})[k]!=null)
+  );
+  {
+    const asgnData = countBy(allTickets, t=>{
+      const f=t.fields||{};
+      const v = _asgnKey ? f[_asgnKey] : null;
+      return personName(v)||'(Nicht zugewiesen)';
+    });
+    const top10 = asgnData.filter(([l])=>l!=='(Nicht zugewiesen)').slice(0,10);
+    if(top10.length) {
+      html += `<div class="rpt-card rpt-card-full">
+        <div class="rpt-title">👤 Top 10 — Zugewiesen an</div>
+        ${barChart(top10, ()=>'var(--navy)')}
+      </div>`;
+    }
   }
 
   html += '</div>';
@@ -2363,14 +2383,8 @@ async function loadDevicesFromSP() {
 }
 
 function buildDevTableIntune() {
-  const cols = [
-    {key:'deviceName',label:'Name'},{key:'operatingSystem',label:'OS'},{key:'osVersion',label:'Version'},
-    {key:'manufacturer',label:'Hersteller'},{key:'model',label:'Modell'},
-    {key:'complianceState',label:'Konformität'},{key:'managementAgent',label:'Verwaltung'},
-    {key:'userPrincipalName',label:'User'},{key:'lastSyncDateTime',label:'Letzter Sync'},
-  ];
-  $id('dev-thead').innerHTML = '<th>#</th>' + cols.map(c=>`<th>${esc(c.label)}</th>`).join('');
-  renderDevices(allDevices, cols);
+  $id('dev-thead').innerHTML = '<th>#</th><th>Gerät</th><th>OS / User</th><th>Status</th><th>Letzter Sync</th>';
+  renderDevices(allDevices);
   $id('dev-count').textContent = allDevices.length + ' Intune-Geräte';
 }
 
@@ -2394,20 +2408,9 @@ function buildDevTableSP() {
 
 function buildDevTable() {
   if (!allDevices.length) { $id('dev-empty').textContent='Keine Geräte'; return; }
-  const cols = [
-    {key:'displayName',      label:'Name'},
-    {key:'operatingSystem',  label:'Betriebssystem'},
-    {key:'operatingSystemVersion', label:'Version'},
-    {key:'manufacturer',     label:'Hersteller'},
-    {key:'model',            label:'Modell'},
-    {key:'trustType',        label:'Vertrauen'},
-    {key:'isManaged',        label:'Verwaltet'},
-    {key:'isCompliant',      label:'Konform'},
-    {key:'approximateLastSignInDateTime', label:'Letzter Login'},
-  ];
-  $id('dev-thead').innerHTML = '<th>#</th>' + cols.map(c=>`<th>${esc(c.label)}</th>`).join('');
-  renderDevices(allDevices, cols);
-  $id('dev-count').textContent = allDevices.length + ' Geräte';
+  $id('dev-thead').innerHTML = '<th>#</th><th>Gerät</th><th>OS / User</th><th>Status</th><th>Letzter Login</th>';
+  renderDevices(allDevices);
+  $id('dev-count').textContent = allDevices.length + ' Azure-Geräte';
 }
 
 function renderDevices(list, cols) {
@@ -2423,28 +2426,35 @@ function renderDevices(list, cols) {
   $id('dev-empty').style.display = list.length ? 'none' : 'block';
   $id('dev-table').style.display = list.length ? '' : 'none';
   tbody.innerHTML = list.map((it,i) => {
-    return `<tr class="clickable" onclick="openDevDetail('${esc(it.deviceId||i)}')">
-      <td style="font-weight:600;color:var(--navy);">${i+1}</td>
-      ${cols.map(c=>{
-        let v = it[c.key];
-        // Boolean badges
-        if (typeof v === 'boolean') {
-          v = v ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">✓ Ja</span>'
-                : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">✗ Nein</span>';
-          return `<td>${v}</td>`;
-        }
-        // Compliance state badge (Intune)
-        if (c.key==='complianceState') {
-          const colors = {compliant:'var(--green)',noncompliant:'var(--red)',unknown:'#6b7280',notApplicable:'#6b7280'};
-          const labels = {compliant:'✓ Konform',noncompliant:'✗ Nicht konform',unknown:'? Unbekannt',notApplicable:'—'};
-          const col = colors[v]||'#6b7280';
-          v = `<span style="background:${col}22;color:${col};padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">${labels[v]||esc(String(v||'—'))}</span>`;
-          return `<td>${v}</td>`;
-        }
-        if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) v = fmt(v);
-        else v = esc(String(v||'—'));
-        return `<td style="font-size:11px;">${v}</td>`;
-      }).join('')}
+    // Build a 2-line card row: title row + details row
+    const name = esc(String(it[cols[0]?.key||'displayName']||it.deviceName||'—'));
+    const os   = esc(String(it.operatingSystem||it.operatingSystemVersion||''));
+    const mfr  = esc(String(it.manufacturer||''));
+    const mdl  = esc(String(it.model||''));
+    const lastSync = it.approximateLastSignInDateTime||it.lastSyncDateTime
+      ? fmt(it.approximateLastSignInDateTime||it.lastSyncDateTime) : '—';
+
+    const managed = it.isManaged===true ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">✓ Verwaltet</span>'
+      : it.isManaged===false ? '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">✗</span>' : '';
+    const compliant = it.isCompliant===true ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">✓ Konform</span>'
+      : it.isCompliant===false ? '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">✗ Nicht konform</span>'
+      : (it.complianceState ? `<span style="background:var(--yellow-bg);color:var(--yellow);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">${esc(it.complianceState)}</span>` : '');
+    const userPrincipal = esc(String(it.userPrincipalName||it.managedBy||''));
+
+    return `<tr class="clickable" onclick="openDevDetail('${esc(it.deviceId||i)}')" style="vertical-align:top;">
+      <td style="padding:10px 8px;font-weight:700;color:var(--navy);font-size:13px;white-space:nowrap;">${i+1}</td>
+      <td style="padding:10px 8px;">
+        <div style="font-weight:700;font-size:13px;color:var(--navy);margin-bottom:3px;">${name}</div>
+        <div style="font-size:11px;color:var(--text-muted);">${mfr}${mfr&&mdl?' · ':''}${mdl}</div>
+      </td>
+      <td style="padding:10px 8px;">
+        <div style="font-size:12px;font-weight:600;">${os}</div>
+        ${userPrincipal?`<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">👤 ${userPrincipal}</div>`:''}
+      </td>
+      <td style="padding:10px 8px;">
+        <div style="display:flex;flex-direction:column;gap:4px;">${managed}${compliant}</div>
+      </td>
+      <td style="padding:10px 8px;font-size:11px;color:var(--text-muted);white-space:nowrap;">🕐 ${lastSync}</td>
     </tr>`;
   }).join('');
 }
