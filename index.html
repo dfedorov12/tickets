@@ -868,14 +868,32 @@ let totalTicketCount = 0;
 let allOlderNextUrl = null;
 let displayedCount = 100;
 
-// ── TICKET CACHE (sessionStorage) ──
+// ── TICKET CACHE (sessionStorage) — schlanke Version ──
+// Speichert nur die für die Anzeige nötigen Felder (kein vollständiges fields-Objekt)
+const CACHE_FIELD_KEYS = ['Title','Status','Priorit_x00e4_t','Priorität','Priority','Prio',
+  'Zugewiesen','AssignedTo','Zugewiesen_x0020_an','Bearbeiter',
+  'Kategorie','Category','Typ','Type','Werk','Standort','Site',
+  'Art','Ticketart','TicketType','Beschreibung','Description'];
+
+function slimTicket(t) {
+  const f = t.fields||{};
+  const slim = {};
+  CACHE_FIELD_KEYS.forEach(k=>{ if(f[k]!==undefined) slim[k]=f[k]; });
+  return { id:t.id, createdDateTime:t.createdDateTime, fields:slim, _attachCount:t._attachCount };
+}
+
 function saveTicketCache() {
   try {
-    sessionStorage.setItem('dihag_tickets', JSON.stringify(allTickets));
+    sessionStorage.removeItem('dihag_tickets');
+    const slim = allTickets.slice(0,300).map(slimTicket);
+    sessionStorage.setItem('dihag_tickets', JSON.stringify(slim));
     sessionStorage.setItem('dihag_ticketCols', JSON.stringify(ticketCols));
     sessionStorage.setItem('dihag_ticketIds', JSON.stringify({siteId:ticketSiteId,listId:ticketListId}));
-    dbg('Cache gespeichert', {tickets: allTickets.length});
-  } catch(e) { dbg('Cache-Fehler', e.message); }
+    dbg('Cache gespeichert', {tickets: slim.length});
+  } catch(e) {
+    dbg('Cache-Fehler (ignoriert)', e.message);
+    try { sessionStorage.clear(); } catch{}
+  }
 }
 
 function restoreTicketCache() {
@@ -1802,123 +1820,79 @@ function buildReports() {
 }
 
 // ════════════════════════════════════════════════════════════════
+// DEVICES (Azure AD Geräte via Graph API)
 // ════════════════════════════════════════════════════════════════
-// DEVICES (Azure Geräte)
-// ════════════════════════════════════════════════════════════════
-const DEV_SITE = 'dihag.sharepoint.com:/sites/IT';
-const DEV_LIST_NAME = 'AzureGerte';
-let devSiteId=null, devListId=null, devCols={}, allDevices=[], devEditingId=null;
+let allDevices=[], devEditingId=null;
 
 async function loadDevices(force) {
   if (!force && allDevices.length) return;
   allDevices = [];
   $id('dev-empty').style.display='block';
-  $id('dev-empty').textContent='Lade Geräte…';
+  $id('dev-empty').textContent='Lade Azure-Geräte…';
   $id('dev-table').style.display='none';
   try {
-    if (!devSiteId) {
-      dbg('Geräte: Verbinde mit Site…', DEV_SITE);
-      const site = await gGet(`/sites/${DEV_SITE}`);
-      devSiteId = site.id;
-      dbg('Geräte: Site gefunden', {id: devSiteId});
-    }
-    if (!devListId) {
-      const lists = await gGet(`/sites/${devSiteId}/lists?$select=id,name,displayName&$top=200`);
-      dbg('Geräte: Verfügbare Listen', (lists.value||[]).map(l=>`${l.displayName} (${l.name})`));
-      // Flexible matching: exact, includes azure/gerät/device
-      const match = (l,s) => l.name===s||l.displayName===s;
-      const fuzzy = l => {
-        const n = (l.name+' '+l.displayName).toLowerCase();
-        return n.includes('azure') || n.includes('gerät') || n.includes('gerte') || n.includes('device');
-      };
-      const lst = (lists.value||[]).find(l=>match(l,DEV_LIST_NAME))
-               || (lists.value||[]).find(l=>match(l,'Azure Geräte'))
-               || (lists.value||[]).find(l=>match(l,'AzureGeräte'))
-               || (lists.value||[]).find(fuzzy);
-      if (!lst) throw new Error('Geräte-Liste nicht gefunden. Verfügbar: '+(lists.value||[]).map(l=>l.displayName).join(', '));
-      devListId = lst.id;
-      dbg('Geräte: Liste gefunden', {id: devListId, name: lst.displayName});
-      const cols = await gGet(`/sites/${devSiteId}/lists/${devListId}/columns?$top=200`);
-      (cols.value||[]).forEach(c=>{ if(!c.readOnly) devCols[c.name]=c.displayName; });
-      dbg('Geräte: Spalten', Object.keys(devCols));
-    }
-    // Load items with Prefer header for large lists
-    dbg('Geräte: Lade Items…');
-    let url = `/sites/${devSiteId}/lists/${devListId}/items?$expand=fields&$top=100`;
+    dbg('Azure-Geräte: Lade via Graph /devices…');
+    let url = '/devices?$select=displayName,operatingSystem,operatingSystemVersion,approximateLastSignInDateTime,deviceId,isCompliant,isManaged,registrationDateTime,manufacturer,model,trustType,profileType&$top=100';
     while (url) {
-      const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
-      const page = d.value||[];
-      dbg('Geräte: Batch empfangen', {items: page.length});
-      allDevices = [...allDevices, ...page];
+      const d = await gGet(url);
+      allDevices = [...allDevices, ...(d.value||[])];
       url = d['@odata.nextLink'] ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
     }
-    dbg('Geräte geladen', {anzahl: allDevices.length});
+    dbg('Azure-Geräte geladen', {anzahl: allDevices.length});
     if (!allDevices.length) {
-      $id('dev-empty').textContent='Keine Geräte in der Liste gefunden.';
+      $id('dev-empty').textContent = 'Keine Azure-Geräte gefunden. (Scope Device.Read.All oder Directory.Read.All ggf. erforderlich)';
       return;
     }
     buildDevTable();
   } catch(e) {
-    dbg('Geräte FEHLER', e.message);
-    $id('dev-empty').textContent='⚠ '+e.message;
+    dbg('Azure-Geräte FEHLER', e.message);
+    // Friendly hint if permission missing
+    const hint = /Forbidden|403|Authorization/.test(e.message)
+      ? ' — Benötigt Scope: Device.Read.All (Admin-Consent erforderlich)'
+      : '';
+    $id('dev-empty').textContent = '⚠ ' + e.message + hint;
     $id('dev-empty').style.color='var(--red)';
   }
 }
 
-function devCol(names) {
-  const arr = Array.isArray(names)?names:[names];
-  for (const n of arr) {
-    if (devCols[n]) return n;
-    const f = Object.keys(devCols).find(k=>k.toLowerCase()===n.toLowerCase()||(devCols[k]||'').toLowerCase()===n.toLowerCase());
-    if (f) return f;
-  }
-  return null;
-}
-
 function buildDevTable() {
   if (!allDevices.length) { $id('dev-empty').textContent='Keine Geräte'; return; }
-  // Build dynamic headers from first few items
-  const skip = new Set(['ContentType','_UIVersionString','Attachments','ID','AuthorLookupId','EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount','ComplianceAssetId']);
-  const colKeys = [];
-  const seen = new Set();
-  allDevices.slice(0,10).forEach(it => {
-    Object.keys(it.fields||{}).forEach(k => {
-      if (!seen.has(k) && !skip.has(k) && !k.startsWith('_') && !k.startsWith('@odata')) {
-        seen.add(k); colKeys.push(k);
-      }
-    });
-  });
-  // Limit to first 8 columns for table
-  const showCols = colKeys.slice(0,8);
-  $id('dev-thead').innerHTML = '<th>#</th>' + showCols.map(k=>`<th>${esc(devCols[k]||k)}</th>`).join('');
-  renderDevices(allDevices, showCols);
+  const cols = [
+    {key:'displayName',      label:'Name'},
+    {key:'operatingSystem',  label:'Betriebssystem'},
+    {key:'operatingSystemVersion', label:'Version'},
+    {key:'manufacturer',     label:'Hersteller'},
+    {key:'model',            label:'Modell'},
+    {key:'trustType',        label:'Vertrauen'},
+    {key:'isManaged',        label:'Verwaltet'},
+    {key:'isCompliant',      label:'Konform'},
+    {key:'approximateLastSignInDateTime', label:'Letzter Login'},
+  ];
+  $id('dev-thead').innerHTML = '<th>#</th>' + cols.map(c=>`<th>${esc(c.label)}</th>`).join('');
+  renderDevices(allDevices, cols);
   $id('dev-count').textContent = allDevices.length + ' Geräte';
 }
 
-function renderDevices(list, showCols) {
-  if (!showCols) {
-    const skip = new Set(['ContentType','_UIVersionString','Attachments','ID','AuthorLookupId','EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount','ComplianceAssetId']);
-    showCols = [];
-    const seen = new Set();
-    allDevices.slice(0,10).forEach(it => {
-      Object.keys(it.fields||{}).forEach(k => {
-        if (!seen.has(k) && !skip.has(k) && !k.startsWith('_') && !k.startsWith('@odata')) { seen.add(k); showCols.push(k); }
-      });
-    });
-    showCols = showCols.slice(0,8);
+function renderDevices(list, cols) {
+  if (!cols) {
+    cols = [
+      {key:'displayName',label:'Name'},{key:'operatingSystem',label:'OS'},
+      {key:'manufacturer',label:'Hersteller'},{key:'model',label:'Modell'},
+      {key:'isManaged',label:'Verwaltet'},{key:'isCompliant',label:'Konform'},
+      {key:'approximateLastSignInDateTime',label:'Letzter Login'},
+    ];
   }
   const tbody = $id('dev-tbody');
   $id('dev-empty').style.display = list.length ? 'none' : 'block';
   $id('dev-table').style.display = list.length ? '' : 'none';
-  tbody.innerHTML = list.map(it => {
-    const f = it.fields||{};
-    return `<tr class="clickable" onclick="openDevDetail('${it.id}')">
-      <td style="font-weight:600;color:var(--navy);">#${it.id}</td>
-      ${showCols.map(k=>{
-        let v = f[k];
-        if (isRichText(v)) v = cleanHtml(v).replace(/<[^>]+>/g,'').substring(0,60);
-        else if (typeof v==='object') v = personName(v);
-        else v = esc(String(v||'')).substring(0,60);
+  tbody.innerHTML = list.map((it,i) => {
+    return `<tr class="clickable" onclick="openDevDetail('${esc(it.deviceId||i)}')">
+      <td style="font-weight:600;color:var(--navy);">${i+1}</td>
+      ${cols.map(c=>{
+        let v = it[c.key];
+        if (typeof v === 'boolean') v = v ? '✓' : '✗';
+        else if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) v = fmt(v);
+        else v = esc(String(v||'—'));
         return `<td style="font-size:11px;">${v}</td>`;
       }).join('')}
     </tr>`;
@@ -1927,62 +1901,41 @@ function renderDevices(list, showCols) {
 
 function filterDevices() {
   const q = ($id('dev-search').value||'').toLowerCase();
-  const filtered = allDevices.filter(it => {
-    const f = it.fields||{};
-    return Object.values(f).some(v => String(v||'').toLowerCase().includes(q));
-  });
+  const filtered = allDevices.filter(it =>
+    Object.values(it).some(v => String(v||'').toLowerCase().includes(q))
+  );
   renderDevices(filtered);
   $id('dev-count').textContent = filtered.length + '/' + allDevices.length + ' Geräte';
 }
 
-function openDevDetail(id) {
-  const it = allDevices.find(t=>t.id==id);
+function openDevDetail(deviceId) {
+  const it = allDevices.find(d=>d.deviceId===deviceId) || allDevices[parseInt(deviceId)];
   if (!it) return;
-  devEditingId = id;
-  const f = it.fields||{};
-  $id('dev-sb-title').textContent = `Gerät #${id}`;
-  const skip = new Set(['ContentType','_UIVersionString','Attachments','ID','AuthorLookupId','EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount','ComplianceAssetId','Modified','Created','Author','Editor']);
+  devEditingId = deviceId;
+  $id('dev-sb-title').textContent = it.displayName || 'Gerät';
+  const skip = new Set(['@odata.type','id']);
+  const labels = {
+    displayName:'Name', operatingSystem:'Betriebssystem', operatingSystemVersion:'OS-Version',
+    manufacturer:'Hersteller', model:'Modell', trustType:'Vertrauen', profileType:'Profil',
+    deviceId:'Geräte-ID', isManaged:'Verwaltet', isCompliant:'Konform',
+    registrationDateTime:'Registriert', approximateLastSignInDateTime:'Letzter Login'
+  };
   let html = '';
-  Object.entries(f).forEach(([k,v])=>{
-    if(skip.has(k)||k.startsWith('_')||k.startsWith('@odata')||v===null||v===undefined||v==='') return;
-    const label = devCols[k]||k;
-    if (isRichText(v)) {
-      html+=`<div class="field-row"><label>${esc(label)}</label>
-        <div class="desc-box" style="padding:8px 10px;border:1.5px solid var(--border2);border-radius:6px;font-size:12px;line-height:1.6;background:var(--bg);">${cleanHtml(v)}</div>
-        <textarea data-fk="${esc(k)}" style="display:none;font-size:12px;margin-top:4px;" rows="3">${esc(String(v))}</textarea>
-        <button onclick="this.previousElementSibling.style.display='';this.previousElementSibling.previousElementSibling.style.display='none';this.style.display='none';" style="font-size:10px;color:var(--blue);background:none;border:none;cursor:pointer;margin-top:2px;">✏️</button>
-      </div>`;
-    } else if (typeof v==='string'&&v.startsWith('[')||Array.isArray(v)) {
-      html+=`<div class="field-row"><label>${esc(label)}</label>
-        <input value="${esc(personName(v))}" style="font-size:12px;background:var(--bg);" readonly/></div>`;
-    } else {
-      const valStr = typeof v==='object'?(v?.LookupValue||v?.displayName||JSON.stringify(v)):String(v);
-      html+=`<div class="field-row"><label>${esc(label)}</label>
-        <input data-fk="${esc(k)}" value="${esc(valStr)}" style="font-size:12px;"/></div>`;
-    }
+  Object.entries(it).forEach(([k,v])=>{
+    if(skip.has(k)||k.startsWith('@')) return;
+    const label = labels[k]||k;
+    let display;
+    if(typeof v==='boolean') display=v?'<span style="color:var(--green);font-weight:700;">✓ Ja</span>':'<span style="color:var(--red);">✗ Nein</span>';
+    else if(typeof v==='string'&&/^\d{4}-\d{2}-\d{2}T/.test(v)) display=esc(fmtFull(v));
+    else display=esc(String(v||'—'));
+    html+=`<div class="field-row"><label>${esc(label)}</label><div style="padding:7px 10px;background:var(--bg);border-radius:6px;font-size:12px;">${display}</div></div>`;
   });
-  html+=`<div style="font-size:10px;color:var(--text-muted);margin-top:8px;">Erstellt: ${fmtFull(it.createdDateTime)}</div>`;
   $id('dev-sb-body').innerHTML = html;
-  $id('dev-sb-actions').innerHTML = `
-    <button class="btn btn-primary" onclick="saveDevSidebar('${id}')" style="flex:1;">✓ Speichern</button>
-    <button class="btn btn-ghost" onclick="closeDevSidebar()">Schließen</button>`;
+  $id('dev-sb-actions').innerHTML = `<button class="btn btn-ghost" onclick="closeDevSidebar()" style="flex:1;">Schließen</button>`;
   $id('dev-sidebar').classList.add('open');
 }
 
 function closeDevSidebar() { $id('dev-sidebar').classList.remove('open'); devEditingId=null; }
-
-async function saveDevSidebar(id) {
-  const raw={};
-  $id('dev-sb-body').querySelectorAll('[data-fk]').forEach(el=>{ if(el.value) raw[el.dataset.fk]=el.value; });
-  const fields = stripReadOnly(raw);
-  try {
-    await gPatch(`/sites/${devSiteId}/lists/${devListId}/items/${id}/fields`, fields);
-    const it = allDevices.find(t=>t.id==id);
-    if(it) Object.assign(it.fields, fields);
-    toast('Gespeichert ✓','success');
-    buildDevTable();
-  } catch(e) { toast('Fehler: '+e.message,'error'); }
-}
 
 // ════════════════════════════════════════════════════════════════
 // PERMISSIONS SYSTEM (Tree-based, 4 Stufen)
@@ -2280,63 +2233,79 @@ async function startPermScan() {
   try {
     const siteName = permSiteUrl.split('/').pop();
 
-    // ── STUFE 1: Site perms — parallel: roleassignments + sitegroups with users ──
+    // ── STUFE 1: Site perms — try roleassignments, fall back to sitegroups ──
     let siteMembers = '';
+    let siteGroupsCache = []; // cache for later reuse in group lookups
+
+    // Always fetch sitegroups (lower permission requirement, more reliable)
     try {
-      // Fetch both in parallel for speed
-      const [raRes, sgRes] = await Promise.allSettled([
-        spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings&$top=100`),
-        spGet(`${permSiteUrl}/_api/web/sitegroups?$expand=Users&$top=100`)
-      ]);
+      const sgRes = await spGet(`${permSiteUrl}/_api/web/sitegroups?$select=Id,Title,Description&$top=100`);
+      siteGroupsCache = sgRes.d?.results || [];
+      // Fetch users for each group separately (more reliable than $expand=Users)
+      for (const g of siteGroupsCache) {
+        try {
+          const uRes = await spGet(`${permSiteUrl}/_api/web/sitegroups(${g.Id})/users?$select=Id,Title,LoginName,Email&$top=200`);
+          g._users = uRes.d?.results || [];
+        } catch { g._users = []; }
+      }
+      dbg('SiteGroups geladen', {groups: siteGroupsCache.length, users: siteGroupsCache.map(g=>g._users.length)});
+    } catch(e) { dbg('SiteGroups Fehler', e.message); }
 
-      const roleAssignments = raRes.status==='fulfilled' ? (raRes.value?.d?.results||[]) : [];
-      const siteGroups      = sgRes.status==='fulfilled' ? (sgRes.value?.d?.results||[]) : [];
-      dbg('Stufe 1', {roleAssignments: roleAssignments.length, siteGroups: siteGroups.length});
-
-      // Build group-ID → users map from sitegroups
-      const groupUsersMap = {};
-      siteGroups.forEach(g=>{ if(g.Id) groupUsersMap[g.Id] = g.Users?.results||[]; });
-
-      // Merge users into roleAssignments
-      roleAssignments.forEach(ra=>{
-        if(ra.Member?.PrincipalType===8 && ra.Member?.Id && groupUsersMap[ra.Member.Id]){
-          ra.Member.Users = { results: groupUsersMap[ra.Member.Id] };
+    // Try roleassignments to get role names (needs site collection admin)
+    let roleAssignments = [];
+    try {
+      const raRes = await spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings&$top=100`);
+      roleAssignments = raRes.d?.results || [];
+      // Merge our pre-fetched users into roleassignments by group ID
+      const groupMap = {};
+      siteGroupsCache.forEach(g => { groupMap[g.Id] = g; });
+      roleAssignments.forEach(ra => {
+        if (ra.Member?.PrincipalType === 8 && ra.Member?.Id) {
+          const g = groupMap[ra.Member.Id];
+          if (g) ra.Member.Users = { results: g._users||[] };
         }
       });
+      dbg('RoleAssignments geladen', {count: roleAssignments.length});
+    } catch(e) { dbg('RoleAssignments nicht verfügbar ('+e.message+'): zeige SiteGroups direkt'); }
 
-      if(roleAssignments.length){
-        siteMembers = `<div class="perm-members" style="padding:4px 0;">${renderMembersTree(roleAssignments)}</div>`;
-      } else if(siteGroups.length){
-        // Fallback: render sitegroups directly if no roleassignments
-        siteMembers = `<div class="perm-members" style="padding:4px 0;">`;
-        siteGroups.forEach(g=>{
-          const users = g.Users?.results||[];
-          const roleLabel = g.Title?.includes('Besitzer')||g.Title?.includes('Owner')?'Vollzugriff':
-                            g.Title?.includes('Mitglieder')||g.Title?.includes('Member')?'Bearbeiten':'Lesen';
-          const ri = roleIcon(roleLabel);
-          const gid='sg_'+(++_permGroupCounter);
-          const usersHtml = users.length
-            ? users.map(u=>`<div class="perm-user-row"><div style="width:20px;height:20px;border-radius:50%;background:#6b7280;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;flex-shrink:0;">👤</div><span style="font-weight:600;">${esc(u.Title||u.LoginName||'?')}</span><span style="font-size:10px;color:var(--text-muted);margin-left:auto;">${esc(u.LoginName||u.Email||'')}</span></div>`).join('')
-            : '<div style="font-size:11px;color:var(--text-muted);padding:4px 6px;">Keine Mitglieder</div>';
-          siteMembers+=`<div class="perm-group-row">
-            <div class="perm-group-hdr" onclick="dToggleGroup('${gid}')">
-              <div class="perm-member-icon" style="background:${ri.bg};">${ri.icon}</div>
-              <span style="font-size:13px;">👥</span>
-              <span class="perm-member-name">${esc(g.Title)}</span>
-              <span style="font-size:9px;padding:2px 7px;background:var(--bg);border:1px solid var(--border);border-radius:10px;color:var(--text-muted);">${users.length} User</span>
-              <span class="perm-member-role">${esc(roleLabel)}</span>
-              <span class="perm-group-toggle" id="tg_${gid}">▶</span>
-            </div>
-            <div class="perm-group-members" id="${gid}">${usersHtml}</div>
-          </div>`;
-        });
-        siteMembers+=`</div>`;
-      } else {
-        siteMembers = `<div style="padding:10px;background:var(--red-bg);border-radius:8px;font-size:11px;color:var(--red);">⚠ Kein Zugriff auf Berechtigungen</div>`;
+    if (roleAssignments.length) {
+      siteMembers = `<div class="perm-members" style="padding:4px 0;">${renderMembersTree(roleAssignments)}</div>`;
+    } else if (siteGroupsCache.length) {
+      // Render sitegroups directly with role inferred from group name
+      siteMembers = '<div class="perm-members" style="padding:4px 0;">';
+      siteGroupsCache.forEach(g => {
+        const users = g._users || [];
+        const roleLabel = /Besitzer|Owner|Full/i.test(g.Title) ? 'Vollzugriff' :
+                          /Mitglieder|Member|Edit|Contribute/i.test(g.Title) ? 'Bearbeiten' : 'Lesen';
+        const ri = roleIcon(roleLabel);
+        const gid = 'sg_'+(++_permGroupCounter);
+        const usersHtml = users.length
+          ? users.map(u=>`<div class="perm-user-row">
+              <div style="width:20px;height:20px;border-radius:50%;background:#6b7280;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;flex-shrink:0;">👤</div>
+              <span style="font-weight:600;">${esc(u.Title||u.LoginName||'?')}</span>
+              <span style="font-size:10px;color:var(--text-muted);margin-left:auto;">${esc(u.Email||u.LoginName||'')}</span>
+            </div>`).join('')
+          : '<div style="font-size:11px;color:var(--text-muted);padding:4px 6px;">Keine Mitglieder</div>';
+        siteMembers += `<div class="perm-group-row">
+          <div class="perm-group-hdr" onclick="dToggleGroup('${gid}')">
+            <div class="perm-member-icon" style="background:${ri.bg};">${ri.icon}</div>
+            <span style="font-size:13px;">👥</span>
+            <span class="perm-member-name">${esc(g.Title)}</span>
+            <span style="font-size:9px;padding:2px 7px;background:var(--bg);border:1px solid var(--border);border-radius:10px;color:var(--text-muted);">${users.length} User</span>
+            <span class="perm-member-role">${esc(roleLabel)}</span>
+            <span class="perm-group-toggle" id="tg_${gid}">▶</span>
+          </div>
+          <div class="perm-group-members" id="${gid}">${usersHtml}</div>
+        </div>`;
+      });
+      siteMembers += '</div>';
+      if (!roleAssignments.length) {
+        siteMembers += `<div style="margin-top:6px;padding:6px 10px;background:#fef9c3;border-radius:6px;font-size:10px;color:#854d0e;">
+          ℹ️ Berechtigungsstufen ohne Site Collection Admin nicht lesbar — Gruppen aus SiteGroups-API angezeigt
+        </div>`;
       }
-    } catch(e1) {
-      dbg('Stufe 1 komplett fehlgeschlagen', e1.message);
-      siteMembers = `<div style="padding:10px;background:var(--red-bg);border-radius:8px;font-size:11px;color:var(--red);">⚠ ${esc(e1.message)}</div>`;
+    } else {
+      siteMembers = `<div style="padding:10px;background:var(--red-bg);border-radius:8px;font-size:11px;color:var(--red);">⚠ Kein Zugriff auf Berechtigungen</div>`;
     }
 
     // ── STUFE 2 ──
@@ -2454,10 +2423,23 @@ async function loadFolderPermsTree() {
       const drivesData = await gGet(`/sites/${permSiteId}/lists/${lib.Id}/drive`);
       const driveId = drivesData.id;
       const rootChildren = await gGet(`/drives/${driveId}/root/children?$top=200`);
-      const folders = (rootChildren.value||[]).filter(f=>f.folder);
-      if (!folders.length) { container.innerHTML='<div class="tree-loading">Keine Ordner</div>'; continue; }
+      const allItems = rootChildren.value||[];
+      const folders = allItems.filter(f=>f.folder);
+      const files   = allItems.filter(f=>!f.folder);
+      if (!allItems.length) { container.innerHTML='<div class="tree-loading">Leer</div>'; continue; }
 
       let html = '';
+
+      // Show files first (flat list)
+      if (files.length) {
+        html += `<div style="font-size:9px;font-weight:700;color:var(--text-muted);padding:4px 0 4px 6px;">Dateien (${files.length}):</div>`;
+        html += files.map(f=>`<div style="display:flex;align-items:center;gap:7px;padding:4px 8px;font-size:11px;border-radius:5px;margin-bottom:2px;">
+          <span>${dmsFileIconPerm(f.name)}</span>
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.name)}</span>
+          <span style="font-size:10px;color:var(--text-muted);">${dmsFormatBytesPerm(f.size||0)}</span>
+          ${f.webUrl?`<a href="${esc(f.webUrl)}" target="_blank" style="font-size:10px;color:var(--blue);text-decoration:none;">↗</a>`:''}
+        </div>`).join('');
+      }
       for (const folder of folders) {
         let uTag='', permsHtml='';
         try {
@@ -2996,6 +2978,17 @@ document.addEventListener('click', e=>{
     document.querySelectorAll('[id$="_dd"]').forEach(dd=>dd.style.display='none');
   }
 });
+
+function dmsFileIconPerm(name){
+  const ext=(name||'').split('.').pop().toLowerCase();
+  const m={pdf:'📄',doc:'📝',docx:'📝',xls:'📊',xlsx:'📊',ppt:'🖥️',pptx:'🖥️',jpg:'🖼️',jpeg:'🖼️',png:'🖼️',gif:'🖼️',zip:'🗜️',txt:'📋',csv:'📊',msg:'✉️'};
+  return m[ext]||'📎';
+}
+function dmsFormatBytesPerm(b){
+  if(b<1024) return b+'B';
+  if(b<1024*1024) return (b/1024).toFixed(0)+'KB';
+  return (b/1024/1024).toFixed(1)+'MB';
+}
 
 // ════════════════════════════════════════════════════════════════
 // DMS — Upload-Enhancement
