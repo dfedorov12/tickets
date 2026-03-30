@@ -427,7 +427,8 @@ header{
       <div class="tkt-toolbar">
         <input class="tkt-search" id="dev-search" placeholder="🔍 Gerät suchen…" oninput="filterDevices()" style="flex:1;max-width:340px;"/>
         <span id="dev-count" style="font-size:11px;color:var(--text-muted);margin-left:4px;white-space:nowrap;"></span>
-        <div style="margin-left:auto;">
+        <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+          <a href="https://dihag.sharepoint.com/sites/IT/Lists/AzureGerte/AllItems.aspx" target="_blank" class="hdr-btn" style="text-decoration:none;" title="In SharePoint öffnen">📋 SP-Liste</a>
           <button class="hdr-btn" onclick="loadDevices(true)">🔄</button>
         </div>
       </div>
@@ -644,7 +645,12 @@ function cleanHtml(v) {
       // Clear all attributes then re-add href
       [...el.attributes].forEach(a=>el.removeAttribute(a.name));
       if (href) {
-        el.setAttribute('href', href);
+        // Make relative links absolute (SP sometimes uses /sites/... paths)
+        let absHref = href;
+        if (href.startsWith('/') && !href.startsWith('//')) {
+          absHref = 'https://dihag.sharepoint.com' + href;
+        }
+        el.setAttribute('href', absHref);
         el.setAttribute('target', '_blank');
         el.style.color = 'var(--blue)';
         el.style.wordBreak = 'break-all';
@@ -1147,58 +1153,30 @@ async function streamTickets() {
 }
 
 async function refreshNewTickets() {
-  // If no tickets loaded yet, do full load
   if (!allTickets.length || !ticketSiteId || !ticketListId) { streamTickets(); return; }
   const btn = $id('btn-refresh');
   if (btn) { btn.disabled=true; btn.textContent='⏳'; }
   try {
-    // Find newest ticket date
-    const newest = allTickets.reduce((max,t)=>{
-      const d=new Date(t.createdDateTime||t.fields?.Created||0);
-      return d>max?d:max;
-    }, new Date(0));
-    // Also check for recently MODIFIED tickets (last 1 hour)
-    const modifiedSince = new Date(Date.now()-3600000).toISOString();
-    const newestIso = newest.toISOString();
-    dbg('Smart Refresh: suche Tickets neuer als', newestIso);
+    // Use max known item ID — SP item IDs are sequential integers
+    const maxId = allTickets.reduce((m,t)=>Math.max(m,parseInt(t.id)||0), 0);
+    dbg('Smart Refresh: maxId =', maxId);
 
-    // Get last 50 items by ID (no $orderby = avoids list view threshold 422)
-    // Sort client-side after fetching
-    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=50`;
+    // Fetch items with ID greater than our max — no $orderby needed
+    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$filter=id gt ${maxId}&$top=100`;
     const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
-    const incoming = d.value||[];
-
-    // Detect new (not yet in cache)
-    const existingIds = new Set(allTickets.map(t=>t.id));
-    const freshNew = incoming.filter(t=>!existingIds.has(t.id));
-
-    // Detect modified (same ID but newer etag/modified date)
-    let updated = 0;
-    incoming.forEach(t=>{
-      if(existingIds.has(t.id)){
-        const idx = allTickets.findIndex(x=>x.id===t.id);
-        if(idx>=0){
-          const oldMod = allTickets[idx].fields?.Modified || allTickets[idx].lastModifiedDateTime || '';
-          const newMod = t.fields?.Modified || t.lastModifiedDateTime || '';
-          if(newMod && newMod !== oldMod){ allTickets[idx]=t; updated++; }
-        }
-      }
-    });
+    const freshNew = d.value||[];
+    dbg('Smart Refresh: neue Items', freshNew.length);
 
     if (freshNew.length) {
       allTickets = [...freshNew, ...allTickets];
       sortByCreatedDesc(allTickets);
       buildFilterOptions(allTickets);
-    }
-
-    if (freshNew.length || updated) {
       const list = filterActive() ? applyFilters(allTickets) : allTickets.slice(0,displayedCount);
       renderTickets(list);
       renderLoadMore();
       $id('tkt-count').textContent = allTickets.length+' Tickets';
       saveTicketCache();
-      const msg = [freshNew.length?freshNew.length+' neu':'', updated?updated+' aktualisiert':''].filter(Boolean).join(', ');
-      toast(`✓ ${msg}`, 'success');
+      toast(`✓ ${freshNew.length} neue${freshNew.length===1?'s':''} Ticket(s)`, 'success');
     } else {
       toast('Keine neuen Tickets', 'info');
     }
@@ -1332,8 +1310,19 @@ function openTicketDetail(id) {
       </select>
     </div>`;
 
-  // All editable fields
-  html += `<div class="section-title" style="margin-top:18px;">Details</div>`;
+  // Always show assigned field at top of details (even if empty)
+  if (assignedCol) {
+    const v = f[assignedCol];
+    const nameStr = v ? personName(v) : '';
+    const fid = 'ppl_'+assignedCol.replace(/[^a-z0-9]/gi,'_');
+    html+=`<div class="field-row"><label>${esc(ticketCols[assignedCol]||'Zugewiesen an')}</label>
+      <div style="position:relative;">
+        <input id="${fid}" data-fk-person="${esc(assignedCol)}" value="${esc(nameStr)}" style="font-size:12px;width:100%;" placeholder="Name suchen…" autocomplete="off" oninput="searchUsers(this,'${fid}_dd')"/>
+        <div id="${fid}_dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border2);border-top:none;border-radius:0 0 7px 7px;z-index:200;max-height:180px;overflow:auto;box-shadow:var(--shadow);"></div>
+        <input type="hidden" id="${fid}_id" data-fk="${esc(assignedCol)}LookupId"/>
+      </div>
+    </div>`
+  }
   // Fields to hide completely
   const skip = new Set([
     '_UIVersionString','ContentType','Attachments','Modified','Created','Author','Editor','ID',
@@ -1341,10 +1330,10 @@ function openTicketDetail(id) {
     'LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount',
     '@odata.etag','id','OData__ColorTag','ComplianceAssetId'
   ]);
+  if (assignedCol) skip.add(assignedCol); // already shown above as editable field
+  html += `<div class="section-title" style="margin-top:12px;">Details</div>`;
   // Detect description and person columns
   const descCol = getCol('desc');
-  const assignedCol = getCol('assigned');
-  const authorCol = col(['Author0','Ticket_x0020_erstellt_x0020_von','TicketErstelltVon','ErstelltVon']);
 
   Object.entries(f).forEach(([k,v])=>{
     if(skip.has(k)||k.startsWith('_')||k.startsWith('@odata')) return;
@@ -1434,7 +1423,6 @@ function openTicketDetail(id) {
   $id('sb-actions').innerHTML = `
     <button class="btn btn-primary" onclick="saveSidebar('${id}')" style="flex:1;">✓ Speichern</button>
     <button class="btn btn-ghost" onclick="openTicketTab('${id}')" title="In App-Tab öffnen">⊞ Tab</button>
-    <button class="btn btn-ghost" onclick="openTicketNewTab('${id}')" title="In Browser-Tab öffnen">🔗</button>
     <button class="btn btn-ghost" onclick="openTicketFullscreen('${id}')">⛶</button>
     <button class="btn btn-ghost"   onclick="closeSidebar()">✕</button>
     <button class="btn btn-danger"  onclick="confirmDeleteTicket('${id}')">🗑</button>`;
@@ -1598,7 +1586,6 @@ function showTicketDetailPanel(id) {
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
       <div style="font-size:20px;font-weight:700;color:var(--navy);flex:1;">Ticket #${id} — ${titleText}</div>
       <button class="btn btn-primary" onclick="saveDetailTab('${id}')">✓ Speichern</button>
-      <button class="btn btn-ghost" onclick="openTicketNewTab('${id}')" title="Als Browser-Tab öffnen">🔗 Ext.</button>
       <button class="btn btn-danger" onclick="confirmDeleteTicket('${id}')">🗑</button>
     </div>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;">
@@ -2492,7 +2479,35 @@ function roleIcon(role) {
 let _permGroupCounter = 0;
 function renderMembersTree(roleAssignments) {
   if (!roleAssignments?.length) return '<div class="tree-loading">Keine spezifischen Berechtigungen</div>';
-  return roleAssignments.map(ra => {
+  // Separate SharingLinks pseudo-groups from real permissions
+  const sharingLinks = roleAssignments.filter(ra => /^SharingLinks\./i.test(ra.Member?.Title||''));
+  const realPerms    = roleAssignments.filter(ra => !/^SharingLinks\./i.test(ra.Member?.Title||''));
+
+  let sharingHtml = '';
+  if (sharingLinks.length) {
+    const slId = 'sl_inline_'+(++_permGroupCounter);
+    const slItems = sharingLinks.map(ra=>{
+      const roles=(ra.RoleDefinitionBindings?.results||ra.RoleDefinitionBindings||[]).map(r=>r.Name).filter(r=>r!=='Limited Access'&&r!=='Beschränkter Zugriff').join(', ');
+      const users=(ra.Member?.Users?.results||[]);
+      const ri=roleIcon(roles);
+      return `<div style="padding:4px 8px;font-size:11px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">
+        <div class="perm-member-icon" style="background:${ri.bg};width:18px;height:18px;">${ri.icon}</div>
+        <span style="font-family:monospace;font-size:10px;color:var(--text-muted);flex:1;overflow:hidden;text-overflow:ellipsis;">${esc(ra.Member?.Title||'?')}</span>
+        <span style="font-size:9px;color:var(--text-muted);">${esc(roles)}</span>
+        ${users.length?`<span style="font-size:9px;background:var(--bg);padding:1px 6px;border-radius:4px;">${users.length} User</span>`:''}
+      </div>`;
+    }).join('');
+    sharingHtml = `<div style="margin-bottom:6px;">
+      <div class="perm-group-hdr" onclick="dToggleGroup('${slId}')" style="background:var(--bg2);">
+        <div class="perm-member-icon" style="background:#6b7280;font-size:9px;">🔗</div>
+        <span class="perm-member-name" style="font-size:11px;">Sharing Links (${sharingLinks.length})</span>
+        <span class="perm-group-toggle" id="tg_${slId}">▶</span>
+      </div>
+      <div class="perm-group-members" id="${slId}" style="font-size:10px;">${slItems}</div>
+    </div>`;
+  }
+
+  const mainHtml = realPerms.map(ra => {
     const member = ra.Member;
     const roles = (ra.RoleDefinitionBindings?.results||ra.RoleDefinitionBindings||[])
       .map(r=>r.Name).filter(r=>r!=='Limited Access'&&r!=='Beschränkter Zugriff').join(', ');
@@ -2537,6 +2552,8 @@ function renderMembersTree(roleAssignments) {
       <span class="perm-member-role">${esc(roles)}</span>
     </div>`;
   }).filter(Boolean).join('');
+
+  return sharingHtml + mainHtml;
 }
 
 function dToggleGroup(id) {
