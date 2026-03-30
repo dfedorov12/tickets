@@ -321,7 +321,7 @@ header{
     <nav class="hdr-nav">
       <button class="hdr-tab on" id="tab-tickets" onclick="showPanel('tickets')">🎫 Tickets</button>
       <button class="hdr-tab"    id="tab-reports" onclick="showPanel('reports')">📊 Reports</button>
-      <button class="hdr-tab"    id="tab-devices" onclick="showPanel('devices')">💻 Geräte</button>
+      <button class="hdr-tab"    id="tab-devices" onclick="showPanel('devices')">💻 Azure-Geräte</button>
       <button class="hdr-tab"    id="tab-dms"     onclick="showPanel('dms')">📄 DMS</button>
       <button class="hdr-tab"    id="tab-perms"   onclick="showPanel('perms')">🔒 Berechtigungen</button>
       <button class="hdr-tab"    id="tab-auto"    onclick="showPanel('auto')">⚡ Automatismen</button>
@@ -457,8 +457,11 @@ header{
             <div id="perm-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border2);border-top:none;border-radius:0 0 8px 8px;max-height:240px;overflow:auto;z-index:50;box-shadow:var(--shadow);"></div>
           </div>
           <button class="btn btn-primary" onclick="startPermScan()" id="perm-scan-btn">🔍 Prüfen</button>
+          <button class="btn btn-ghost" onclick="runPermDiag()" style="font-size:11px;" title="API-Berechtigungen diagnostizieren">🔧 Diagnose</button>
         </div>
         <div id="perm-status" style="font-size:11px;color:var(--text-muted);margin-top:8px;"></div>
+        <!-- Diagnose-Panel -->
+        <div id="perm-diag" style="display:none;margin-top:12px;background:#f8fafc;border:1.5px solid var(--border);border-radius:8px;padding:14px;font-size:11px;"></div>
       </div>
       <div style="padding:20px 24px;" id="perm-container">
         <div class="empty" id="perm-empty">Site suchen und auswählen</div>
@@ -864,7 +867,6 @@ let allPrevSkip = 0;
 let totalTicketCount = 0;
 let allOlderNextUrl = null;
 let displayedCount = 100;
-let _pollInterval = null;
 
 // ── TICKET CACHE (sessionStorage) ──
 function saveTicketCache() {
@@ -1020,8 +1022,6 @@ async function initTickets() {
     if (!lst) throw new Error('Liste nicht gefunden: '+(lists.value||[]).map(l=>l.displayName).join(', '));
     ticketListId = lst.id;
     dbg('Ticketliste gefunden', {listId: ticketListId, name: lst.displayName});
-    // SP now connected — rebuild Automatismen grid so all SP-dependent forms go live
-    buildAutoGrid();
     const cols = await gGet(`/sites/${ticketSiteId}/lists/${ticketListId}/columns?$top=200`);
     (cols.value||[]).forEach(c=>{
       if(!c.readOnly) ticketCols[c.name]=c.displayName;
@@ -1038,7 +1038,6 @@ async function initTickets() {
 }
 
 async function streamTickets() {
-  if (_pollInterval) { clearInterval(_pollInterval); _pollInterval = null; }
   allTickets=[]; allTicketsComplete=false; allOlderNextUrl=null; displayedCount=100;
   $id('tkt-empty').style.display='block';
   $id('tkt-empty').textContent='Lade Tickets…';
@@ -1109,49 +1108,16 @@ async function loadOlderTicketsInBackground(recentDate) {
     }
     allTicketsComplete=true;
     renderLoadMore();
-    dbg(`PHASE 2 abgeschlossen ✓ — Gesamt: ${allTickets.length} Tickets im Cache (für Suche/Filter bereit)`);
+    dbg(`PHASE 2 abgeschlossen ✓ — Gesamt: ${allTickets.length} Tickets`);
     saveTicketCache();
     $id('tkt-count').textContent=allTickets.length+' Tickets';
     console.log('[Tickets] komplett:', allTickets.length);
-    startTicketPolling();
   } catch(e) {
     dbg('FEHLER Phase 2 (Hintergrund)', e.message);
     console.warn('[Tickets Background]', e.message);
     allTicketsComplete=true;
     renderLoadMore();
     $id('tkt-count').textContent=allTickets.length+' Tickets (teilweise)';
-    startTicketPolling();
-  }
-}
-
-// ── LIVE-POLLING: alle 3 Sek. auf neue Tickets prüfen ──
-function startTicketPolling() {
-  if (_pollInterval) clearInterval(_pollInterval);
-  _pollInterval = setInterval(pollNewTickets, 3000);
-  dbg('Polling gestartet (3s-Intervall)');
-}
-
-async function pollNewTickets() {
-  if (!ticketSiteId || !ticketListId) return;
-  try {
-    // Fetch the 20 most recent tickets by created date — compare by ID to detect new ones
-    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$orderby=createdDateTime desc&$top=20`;
-    const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
-    const existingIds = new Set(allTickets.map(t=>t.id));
-    const fresh = (d.value||[]).filter(t => !existingIds.has(t.id));
-    if (!fresh.length) return;
-    dbg(`Polling: ${fresh.length} neue(s) Ticket(s) gefunden`);
-    allTickets = [...fresh, ...allTickets];
-    sortByCreatedDesc(allTickets);
-    buildFilterOptions(allTickets);
-    const list = filterActive() ? applyFilters(allTickets) : allTickets.slice(0, displayedCount);
-    renderTickets(list);
-    renderLoadMore();
-    $id('tkt-count').textContent = allTickets.length+' Tickets';
-    saveTicketCache();
-    toast(`🔔 ${fresh.length} neue${fresh.length===1?'s':''} Ticket eingegangen`, 'info');
-  } catch(e) {
-    dbg('Polling-Fehler (ignoriert)', e.message);
   }
 }
 
@@ -2167,6 +2133,102 @@ function dToggleGroup(id) {
   if (tg) tg.classList.toggle('open', el.classList.contains('open'));
 }
 
+// ════════════════════════════════════════════════════════════════
+// BERECHTIGUNGEN — API-DIAGNOSE
+// Prüft welche Graph- und SP-REST-Endpunkte erreichbar sind
+// und erklärt fehlende Azure AD App-Berechtigungen
+// ════════════════════════════════════════════════════════════════
+async function runPermDiag() {
+  const diag = $id('perm-diag');
+  diag.style.display = 'block';
+  diag.innerHTML = '<span class="perm-spinner"></span> Prüfe API-Zugriffe…';
+
+  const siteUrl = permSiteUrl || 'https://dihag.sharepoint.com/sites/ticket';
+  const siteId  = permSiteId  || null;
+
+  const checks = [
+    {
+      label: 'Graph: /me (Anmeldung)',
+      desc: 'User.Read',
+      fn: ()=> gGet('/me?$select=displayName,mail')
+    },
+    {
+      label: 'Graph: Sites durchsuchen',
+      desc: 'Sites.Read.All',
+      fn: ()=> gGet('/sites?search=ticket&$top=1')
+    },
+    {
+      label: 'SP REST: Web-Info',
+      desc: 'Kein extra Scope (SP-Token)',
+      fn: ()=> spGet(`${siteUrl}/_api/web?$select=Title`)
+    },
+    {
+      label: 'SP REST: RoleAssignments (Site-Berechtigungen)',
+      desc: 'Benötigt: Site Collection Admin ODER "Full Control" auf der Site',
+      fn: ()=> spGet(`${siteUrl}/_api/web/roleassignments?$top=1&$expand=Member,RoleDefinitionBindings`)
+    },
+    {
+      label: 'SP REST: SiteGroups + Users',
+      desc: 'Benötigt: Mitglied einer SP-Gruppe (Besitzer/Mitglieder/Besucher)',
+      fn: ()=> spGet(`${siteUrl}/_api/web/sitegroups?$top=3&$expand=Users`)
+    },
+    {
+      label: 'SP REST: Listen (nicht ausgeblendet)',
+      desc: 'Benötigt: Lesen auf der Site',
+      fn: ()=> spGet(`${siteUrl}/_api/web/lists?$filter=Hidden eq false&$top=3&$select=Title`)
+    },
+    ...(siteId ? [{
+      label: 'Graph: Drives (Bibliotheken)',
+      desc: 'Sites.Read.All oder Files.Read.All',
+      fn: ()=> gGet(`/sites/${siteId}/drives?$top=3`)
+    }] : [])
+  ];
+
+  let rows = `<div style="font-weight:700;color:var(--navy);margin-bottom:10px;">🔧 API-Diagnose — ${siteUrl}</div>
+    <div style="font-size:10px;color:var(--text-muted);margin-bottom:10px;">
+      Benötigte Azure AD App-Berechtigungen: <code>User.Read, Sites.Read.All, Sites.ReadWrite.All, Files.ReadWrite.All</code><br>
+      SP-REST benötigt zusätzlich dass der angemeldete User <strong>Site Collection Admin</strong> ist oder zumindest Mitglied einer SP-Gruppe.
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;">
+      <tr style="background:var(--bg);"><th style="padding:5px 8px;text-align:left;border-bottom:2px solid var(--border);">Endpunkt</th><th style="padding:5px 8px;text-align:left;border-bottom:2px solid var(--border);">Scope/Voraussetzung</th><th style="padding:5px 8px;border-bottom:2px solid var(--border);">Status</th></tr>`;
+
+  for (const c of checks) {
+    let status, color;
+    try {
+      const r = await c.fn();
+      status = '✓ OK';
+      color = 'var(--green)';
+      if (r?.value?.length !== undefined) status += ` (${r.value.length} Einträge)`;
+      else if (r?.d?.results?.length !== undefined) status += ` (${r.d.results.length} Einträge)`;
+      else if (r?.displayName) status += ` — ${r.displayName}`;
+      else if (r?.d?.Title) status += ` — ${r.d.Title}`;
+    } catch(e) {
+      const msg = e.message||'';
+      const code = msg.match(/\d{3}/)?.[0]||'';
+      if (code==='403') { status='⛔ 403 Kein Zugriff'; color='var(--red)'; }
+      else if (code==='401') { status='🔑 401 Nicht authentifiziert'; color='var(--red)'; }
+      else if (code==='404') { status='❓ 404 Nicht gefunden'; color='var(--yellow)'; }
+      else { status='⚠ '+msg.substring(0,60); color='var(--orange)'; }
+    }
+    rows += `<tr>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--border);">${esc(c.label)}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--border);color:var(--text-muted);">${esc(c.desc)}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--border);font-weight:700;color:${color};">${esc(status)}</td>
+    </tr>`;
+  }
+
+  rows += `</table>
+    <div style="margin-top:12px;padding:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;color:#92400e;font-size:10px;">
+      <strong>Wenn RoleAssignments 403 zurückgibt aber SiteGroups OK ist:</strong><br>
+      Der angemeldete User ist zwar SP-Mitglied, aber kein <em>Site Collection Admin</em>.<br>
+      → In SharePoint Admin Center: Site auswählen → „Administrators" → User hinzufügen.<br>
+      → Oder in der Site selbst: Zahnrad → Site-Einstellungen → Site Collection-Administratoren.<br><br>
+      <strong>Wenn beide 403:</strong> Die Azure AD App hat möglicherweise nicht <code>Sites.ReadWrite.All</code> als delegierte Berechtigung — oder der Admin-Consent fehlt noch.
+    </div>`;
+
+  diag.innerHTML = rows;
+}
+
 let treeIdCounter = 0;
 function treeNode(icon, label, badge, children, expandId) {
   const id = expandId || ('tn_'+(treeIdCounter++));
@@ -2778,24 +2840,20 @@ Notizen: ${d.notizen||'-'}`.trim();
 
 let currentAutoKey=null;
 
-// Which automations are standalone (no SharePoint list needed)
-const AUTO_STANDALONE = new Set(['abwesenheit']);
-// All keys that have real onSubmit handlers
-const AUTO_HAS_FORM = new Set(Object.keys({})); // filled at runtime
+// Explizit freigegebene Automatismen (vom Admin aktiviert)
+const AUTO_ACTIVE = new Set(['offboarding', 'abwesenheit']);
 
 function buildAutoGrid(){
   const grid=$id('auto-grid'); grid.innerHTML='';
-  const spConnected = !!(ticketSiteId && ticketListId);
+  // Active first, then grayed out
   const sorted = Object.entries(AUTO_FORMS).sort((a,b)=>{
-    const aLive = AUTO_STANDALONE.has(a[0]) || spConnected;
-    const bLive = AUTO_STANDALONE.has(b[0]) || spConnected;
-    return (bLive?0:1)-(aLive?0:1);
+    return (AUTO_ACTIVE.has(b[0])?1:0) - (AUTO_ACTIVE.has(a[0])?1:0);
   });
   sorted.forEach(([key,form])=>{
-    const isLive = AUTO_STANDALONE.has(key) || spConnected;
+    const isLive = AUTO_ACTIVE.has(key);
     const card=document.createElement('div');
     card.className='auto-card' + (isLive ? ' live' : ' planned');
-    const tagLabel = isLive ? '✓ Aktiv' : '⚠ Keine SP-Verbindung';
+    const tagLabel = isLive ? '✓ Aktiv' : '⏸ Inaktiv';
     card.innerHTML=`<div class="auto-card-icon">${form.icon}</div>
       <div class="auto-card-title">${esc(form.title)}</div>
       <div class="auto-card-desc">${esc(form.desc)}</div>
