@@ -694,9 +694,11 @@ function toast(msg,type='info'){
 let msalApp, account;
 
 async function initAuth() {
+  // Use current page as redirectUri so it works locally, from GitHub Pages, or anywhere
+  const redirectUri = window.location.href.split('?')[0].split('#')[0];
   const cfg = {
     auth:{ clientId:CLIENT_ID, authority:`https://login.microsoftonline.com/${TENANT_ID}`,
-           redirectUri: 'https://dfedorov12.github.io/tickets/' },
+           redirectUri },
     cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:true }
   };
   msalApp = new msal.PublicClientApplication(cfg);
@@ -741,8 +743,28 @@ async function getToken() {
 
 async function getSpToken() {
   const origin = 'https://dihag.sharepoint.com';
-  try { return (await msalApp.acquireTokenSilent({scopes:[`${origin}/Sites.ReadWrite.All`],account})).accessToken; }
-  catch { return (await msalApp.acquireTokenPopup({scopes:[`${origin}/Sites.ReadWrite.All`],account})).accessToken; }
+  // Try AllSites.FullControl first (needed for RoleAssignments), fall back to Sites.ReadWrite.All
+  for (const scope of [`${origin}/AllSites.FullControl`, `${origin}/Sites.ReadWrite.All`, `${origin}/AllSites.Write`]) {
+    try {
+      const res = await msalApp.acquireTokenSilent({scopes:[scope], account});
+      return res.accessToken;
+    } catch {}
+  }
+  // Final fallback with popup
+  const res = await msalApp.acquireTokenPopup({scopes:[`${origin}/Sites.ReadWrite.All`], account});
+  return res.accessToken;
+}
+
+// Also try re-requesting with user's site URL dynamically
+async function getSpTokenForSite(siteUrl) {
+  const origin = new URL(siteUrl).origin; // e.g. https://dihag.sharepoint.com
+  for (const scope of [`${origin}/AllSites.FullControl`, `${origin}/Sites.ReadWrite.All`]) {
+    try {
+      const res = await msalApp.acquireTokenSilent({scopes:[scope], account});
+      return res.accessToken;
+    } catch {}
+  }
+  return await getSpToken();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1004,7 +1026,7 @@ function renderTickets(list) {
       ? `<span class="attach-count">📎 ${attCount}</span>`
       : '<span style="color:var(--text-muted);font-size:10px;">—</span>';
 
-    return `<tr class="clickable" onclick="openTicketTab('${it.id}')" ondblclick="openTicketDetail('${it.id}')">
+    return `<tr class="clickable" onclick="openTicketDetail('${it.id}')" ondblclick="openTicketTabBg('${it.id}')">
       <td style="font-weight:600;color:var(--navy);">#${it.id}</td>
       <td>${esc(f[cTitle] || f.Title || '')}</td>
       <td style="color:var(--text-dim);">${esc(assigned)}</td>
@@ -1140,7 +1162,9 @@ async function refreshNewTickets() {
     const newestIso = newest.toISOString();
     dbg('Smart Refresh: suche Tickets neuer als', newestIso);
 
-    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$orderby=createdDateTime desc&$top=50`;
+    // Get last 50 items by ID (no $orderby = avoids list view threshold 422)
+    // Sort client-side after fetching
+    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=50`;
     const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
     const incoming = d.value||[];
 
@@ -1341,22 +1365,22 @@ function openTicketDetail(id) {
 
     // Person fields — editable with user search
     const isPersonJson = typeof v === 'string' && v.startsWith('[') && /LookupValue|Email/.test(v);
-    const isPersonObj = Array.isArray(v) && v.length && (v[0].LookupValue || v[0].Email);
+    const isPersonObj  = Array.isArray(v) && v.length && (v[0]?.LookupValue || v[0]?.Email);
     if(k===assignedCol || k===authorCol || isPersonJson || isPersonObj) {
       const nameStr = personName(v);
-      const isEditable = (k===assignedCol); // only AssignedTo is editable
+      const isEditable = (k===assignedCol);
       if(isEditable){
         const fid='ppl_'+k.replace(/[^a-z0-9]/gi,'_');
         html+=`<div class="field-row"><label>${esc(label)}</label>
           <div style="position:relative;">
-            <input id="${fid}" data-fk-person="${esc(k)}" value="${esc(nameStr)}" style="font-size:12px;width:100%;" placeholder="Name suchen…" oninput="searchUsers(this,'${fid}_dd')" autocomplete="off"/>
+            <input id="${fid}" data-fk-person="${esc(k)}" value="${esc(nameStr)}" style="font-size:12px;width:100%;" placeholder="Name suchen…" autocomplete="off" oninput="searchUsers(this,'${fid}_dd')"/>
             <div id="${fid}_dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border2);border-top:none;border-radius:0 0 7px 7px;z-index:200;max-height:180px;overflow:auto;box-shadow:var(--shadow);"></div>
             <input type="hidden" id="${fid}_id" data-fk="${esc(k)}LookupId"/>
           </div>
         </div>`;
       } else {
         html+=`<div class="field-row"><label>${esc(label)}</label>
-          <input value="${esc(nameStr)}" style="font-size:12px;background:var(--bg);cursor:default;" readonly tabindex="-1"/></div>`;
+          <input value="${esc(nameStr)}" style="font-size:12px;background:var(--bg);" readonly tabindex="-1"/></div>`;
       }
       return;
     }
@@ -1459,6 +1483,18 @@ function closeSidebar() { $id('tkt-sidebar').classList.remove('open'); editingId
 // ── IN-APP TICKET TABS ──
 let _openTabs = {};
 let _activeTabId = null;
+
+function openTicketTabBg(id) {
+  // Open tab in background without switching to it
+  const it = allTickets.find(t=>t.id==id);
+  if (!it) { toast('Ticket nicht im Cache','error'); return; }
+  const f = it.fields||{};
+  const cTitle = getCol('title')||'Title';
+  const title  = String(f[cTitle]||f.Title||'Ticket #'+id).substring(0,30);
+  _openTabs[id] = {id, title};
+  renderTabBar();
+  toast(`Tab #${id} im Hintergrund geöffnet`, 'info');
+}
 
 function openTicketTab(id) {
   const it = allTickets.find(t=>t.id==id);
@@ -2425,21 +2461,24 @@ document.addEventListener('click', e => {
 });
 
 async function spGet(url) {
-  // Try SP token first, then Graph token as fallback
-  for (const getTokenFn of [getSpToken, getToken]) {
-    try {
-      const tok = await getTokenFn();
-      const r = await fetch(url, {headers:{Authorization:'Bearer '+tok, Accept:'application/json;odata=verbose'}});
-      if (r.ok) return r.json();
-      if (r.status === 403 && getTokenFn === getSpToken) {
-        dbg('SP-Token 403, versuche Graph-Token…');
-        continue; // try next token
-      }
-      throw new Error(`SP ${r.status}: ${await r.text().catch(()=>'')}`);
-    } catch(e) {
-      if (getTokenFn === getToken) throw e; // both failed
+  // Derive token scope from URL
+  const gettok = async () => {
+    try { return await getSpTokenForSite(url); } catch { return getToken(); }
+  };
+  const tok = await gettok();
+  const r = await fetch(url, {headers:{Authorization:'Bearer '+tok, Accept:'application/json;odata=verbose'}});
+  if (r.ok) return r.json();
+  // On 401, force a fresh token with popup
+  if (r.status === 401) {
+    dbg('SP 401 — versuche neuen Token per Popup…');
+    const tok2 = await msalApp.acquireTokenPopup({scopes:['https://dihag.sharepoint.com/Sites.ReadWrite.All'], account}).then(r=>r.accessToken).catch(()=>null);
+    if (tok2) {
+      const r2 = await fetch(url, {headers:{Authorization:'Bearer '+tok2, Accept:'application/json;odata=verbose'}});
+      if (r2.ok) return r2.json();
+      throw new Error(`SP ${r2.status}: ${await r2.text().catch(()=>'')}`);
     }
   }
+  throw new Error(`SP ${r.status}: ${await r.text().catch(()=>'')}`);
 }
 
 function roleIcon(role) {
