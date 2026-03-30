@@ -424,53 +424,59 @@ header{
 
     <!-- DEVICES PANEL (Azure Geräte) -->
     <div class="panel" id="panel-devices" style="flex-direction:column;">
-      <!-- Tabs: Azure AD | SP Liste -->
-      <div style="display:flex;align-items:center;gap:0;border-bottom:2px solid var(--border);background:#fff;flex-shrink:0;">
-        <button id="dev-tab-azure" onclick="switchDevTab('azure')" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:12px;font-weight:700;color:var(--navy);border-bottom:3px solid var(--navy);cursor:pointer;margin-bottom:-2px;">💻 Azure AD Geräte</button>
-        <button id="dev-tab-sp"    onclick="switchDevTab('sp')"    style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--text-dim);cursor:pointer;margin-bottom:-2px;">📋 SP AzureGerte-Liste</button>
-        <div style="margin-left:auto;padding-right:12px;display:flex;gap:6px;">
-          <input class="tkt-search" id="dev-search" placeholder="🔍 Suchen…" oninput="filterDevices()" style="max-width:220px;"/>
-          <span id="dev-count" style="font-size:11px;color:var(--text-muted);align-self:center;white-space:nowrap;"></span>
-          <button class="hdr-btn" onclick="loadDevices(true)">🔄</button>
-        </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;flex-wrap:wrap;">
+        <span style="font-size:12px;font-weight:700;color:var(--navy);">💻 Azure AD Geräte</span>
+        <div style="width:1px;height:20px;background:var(--border);"></div>
+        <input class="tkt-search" id="dev-search" placeholder="🔍 Suchen…" oninput="filterDevices()" style="max-width:200px;"/>
+        <span id="dev-count" style="font-size:11px;color:var(--text-muted);white-space:nowrap;"></span>
+        <button class="hdr-btn" onclick="loadDevices(true)" style="margin-left:auto;">🔄 Azure</button>
+        <button class="hdr-btn" onclick="loadDevSP(true)">🔄 SP-Liste</button>
       </div>
-      <!-- Azure AD panel -->
-      <div id="dev-pane-azure" style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
-        <div class="tkt-main">
-          <div style="flex:1;overflow:auto;" id="dev-table-wrap">
-            <div class="empty" id="dev-empty">Lade Geräte…</div>
-            <table class="tkt-table" id="dev-table" style="display:none;">
-              <thead><tr id="dev-thead"></tr></thead>
-              <tbody id="dev-tbody"></tbody>
-            </table>
-          </div>
-          <div class="tkt-sidebar" id="dev-sidebar">
-            <div class="tkt-sidebar-hdr">
-              <div style="font-size:14px;font-weight:700;color:var(--navy);" id="dev-sb-title">Gerät</div>
-              <button class="tkt-close" onclick="closeDevSidebar()">✕</button>
+      <!-- Side-by-side: Azure AD (left) + SP AzureGerte (right) -->
+      <div style="flex:1;overflow:hidden;display:flex;flex-direction:row;gap:0;">
+        <!-- Azure AD half -->
+        <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;border-right:2px solid var(--border);">
+          <div style="padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--navy);">💻 Azure AD Geräte</div>
+          <div class="tkt-main" style="flex:1;overflow:hidden;">
+            <div style="flex:1;overflow:auto;" id="dev-table-wrap">
+              <div class="empty" id="dev-empty">Lade Geräte…</div>
+              <table class="tkt-table" id="dev-table" style="display:none;">
+                <thead><tr id="dev-thead"></tr></thead>
+                <tbody id="dev-tbody"></tbody>
+              </table>
             </div>
-            <div class="tkt-sidebar-body" id="dev-sb-body"></div>
-            <div class="sidebar-actions" id="dev-sb-actions"></div>
+            <div class="tkt-sidebar" id="dev-sidebar">
+              <div class="tkt-sidebar-hdr">
+                <div style="font-size:14px;font-weight:700;color:var(--navy);" id="dev-sb-title">Gerät</div>
+                <button class="tkt-close" onclick="closeDevSidebar()">✕</button>
+              </div>
+              <div class="tkt-sidebar-body" id="dev-sb-body"></div>
+              <div class="sidebar-actions" id="dev-sb-actions"></div>
+            </div>
           </div>
         </div>
-      </div>
-      <!-- SP AzureGerte panel -->
-      <div id="dev-pane-sp" style="flex:1;overflow:hidden;display:none;flex-direction:column;">
-        <div class="tkt-main">
-          <div style="flex:1;overflow:auto;" id="dev-sp-table-wrap">
-            <div class="empty" id="dev-sp-empty">SP-Liste wird geladen…</div>
-            <table class="tkt-table" id="dev-sp-table" style="display:none;">
-              <thead><tr id="dev-sp-thead"></tr></thead>
-              <tbody id="dev-sp-tbody"></tbody>
-            </table>
+        <!-- SP AzureGerte half -->
+        <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
+          <div style="padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--navy);">
+            📋 SP AzureGerte-Liste
+            <a href="https://dihag.sharepoint.com/sites/IT/Lists/AzureGerte/AllItems.aspx" target="_blank" style="font-size:10px;color:var(--blue);font-weight:400;margin-left:8px;">↗ In SP öffnen</a>
           </div>
-          <div class="tkt-sidebar" id="dev-sp-sidebar">
-            <div class="tkt-sidebar-hdr">
-              <div style="font-size:14px;font-weight:700;color:var(--navy);" id="dev-sp-sb-title">Eintrag</div>
-              <button class="tkt-close" onclick="$id('dev-sp-sidebar').classList.remove('open')">✕</button>
+          <div class="tkt-main" style="flex:1;overflow:hidden;">
+            <div style="flex:1;overflow:auto;" id="dev-sp-table-wrap">
+              <div class="empty" id="dev-sp-empty">SP-Liste wird geladen…</div>
+              <table class="tkt-table" id="dev-sp-table" style="display:none;">
+                <thead><tr id="dev-sp-thead"></tr></thead>
+                <tbody id="dev-sp-tbody"></tbody>
+              </table>
             </div>
-            <div class="tkt-sidebar-body" id="dev-sp-sb-body"></div>
-            <div class="sidebar-actions" id="dev-sp-sb-actions"></div>
+            <div class="tkt-sidebar" id="dev-sp-sidebar">
+              <div class="tkt-sidebar-hdr">
+                <div style="font-size:14px;font-weight:700;color:var(--navy);" id="dev-sp-sb-title">Eintrag</div>
+                <button class="tkt-close" onclick="$id('dev-sp-sidebar').classList.remove('open')">✕</button>
+              </div>
+              <div class="tkt-sidebar-body" id="dev-sp-sb-body"></div>
+              <div class="sidebar-actions" id="dev-sp-sb-actions"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -883,7 +889,7 @@ function showPanel(id) {
   $id('btn-new').style.display     = (id==='tickets'||id==='ticket-detail') ? '' : 'none';
   $id('btn-refresh').style.display = id==='tickets' ? '' : 'none';
   if (id==='reports' && allTickets.length) buildReports();
-  if (id==='devices' && !allDevices.length) loadDevices();
+  if (id==='devices') { if(!allDevices.length) loadDevices(); loadDevSP(false); }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1056,7 +1062,7 @@ function renderTickets(list) {
       ? `<span class="attach-count">📎 ${attCount}</span>`
       : '<span style="color:var(--text-muted);font-size:10px;">—</span>';
 
-    return `<tr class="clickable" onclick="openTicketDetail('${it.id}')" ondblclick="openTicketTabBg('${it.id}')">
+    return `<tr class="clickable" onclick="openTicketTab('${it.id}')" ondblclick="openTicketTabBg('${it.id}')">
       <td style="font-weight:600;color:var(--navy);">#${it.id}</td>
       <td>${esc(f[cTitle] || f.Title || '')}</td>
       <td style="color:var(--text-dim);">${esc(assigned)}</td>
@@ -1365,6 +1371,7 @@ function openTicketDetail(id) {
   html += `<div class="section-title" style="margin-top:12px;">Details</div>`;
   // Detect description and person columns
   const descCol = getCol('desc');
+  const authorCol = col(['Author0','Ticket_x0020_erstellt_x0020_von','TicketErstelltVon','ErstelltVon']);
 
   Object.entries(f).forEach(([k,v])=>{
     if(skip.has(k)||k.startsWith('_')||k.startsWith('@odata')) return;
@@ -2436,7 +2443,8 @@ function switchDevTab(tab) {
   if (tab==='sp' && !_devSpItems.length) loadDevSP();
 }
 
-async function loadDevSP() {
+async function loadDevSP(force) {
+  if(!force && _devSpItems.length) return;
   const empty = $id('dev-sp-empty');
   const table = $id('dev-sp-table');
   if (!empty||!table) return;
@@ -2870,36 +2878,61 @@ async function startPermScan() {
     let siteMembers = '';
     let siteGroupsCache = []; // cache for later reuse in group lookups
 
-    // Always fetch sitegroups (lower permission requirement, more reliable)
+    // Strategy 1: Graph API /sites/{id}/permissions (no SP admin needed)
+    let roleAssignments = [];
+    try {
+      const gPerms = await gGet(`/sites/${permSiteId}/permissions?$top=100`);
+      const gPA = gPerms.value||[];
+      dbg('Graph permissions', {count: gPA.length});
+      // Convert Graph permission format to SP roleassignment-like format for renderMembersTree
+      roleAssignments = gPA.map(p => {
+        const roles = p.roles||[];
+        const roleLabel = roles.includes('fullControl')?'Vollzugriff':roles.includes('write')?'Bearbeiten':roles.includes('read')?'Lesen':roles.join(',');
+        const identity = p.grantedToIdentitiesV2?.[0]||p.grantedToV2||{};
+        const user = identity.user||identity.group||{};
+        const isGroup = !!identity.group;
+        return {
+          Member: {
+            PrincipalType: isGroup?8:1,
+            Title: user.displayName||p.id||'?',
+            LoginName: user.email||'',
+            Users: {results:[]}
+          },
+          RoleDefinitionBindings: {results:[{Name:roleLabel}]}
+        };
+      });
+    } catch(e) { dbg('Graph permissions Fehler', e.message); }
+
+    // Strategy 2: SP REST sitegroups (works if user is SP member)
     try {
       const sgRes = await spGet(`${permSiteUrl}/_api/web/sitegroups?$select=Id,Title,Description&$top=100`);
       siteGroupsCache = sgRes.d?.results || [];
-      // Fetch users for each group separately (more reliable than $expand=Users)
       for (const g of siteGroupsCache) {
         try {
           const uRes = await spGet(`${permSiteUrl}/_api/web/sitegroups(${g.Id})/users?$select=Id,Title,LoginName,Email&$top=200`);
           g._users = uRes.d?.results || [];
         } catch { g._users = []; }
       }
-      dbg('SiteGroups geladen', {groups: siteGroupsCache.length, users: siteGroupsCache.map(g=>g._users.length)});
+      dbg('SiteGroups geladen', {groups: siteGroupsCache.length});
     } catch(e) { dbg('SiteGroups Fehler', e.message); }
 
-    // Try roleassignments to get role names (needs site collection admin)
-    let roleAssignments = [];
-    try {
-      const raRes = await spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings&$top=100`);
-      roleAssignments = raRes.d?.results || [];
-      // Merge our pre-fetched users into roleassignments by group ID
-      const groupMap = {};
-      siteGroupsCache.forEach(g => { groupMap[g.Id] = g; });
-      roleAssignments.forEach(ra => {
-        if (ra.Member?.PrincipalType === 8 && ra.Member?.Id) {
-          const g = groupMap[ra.Member.Id];
-          if (g) ra.Member.Users = { results: g._users||[] };
-        }
-      });
-      dbg('RoleAssignments geladen', {count: roleAssignments.length});
-    } catch(e) { dbg('RoleAssignments nicht verfügbar ('+e.message+'): zeige SiteGroups direkt'); }
+    // Strategy 3: SP REST roleassignments (needs AllSites.FullControl scope)
+    if (!roleAssignments.length) {
+      try {
+        const raRes = await spGet(`${permSiteUrl}/_api/web/roleassignments?$expand=Member,RoleDefinitionBindings&$top=100`);
+        const rawRA = raRes.d?.results || [];
+        const groupMap = {};
+        siteGroupsCache.forEach(g => { groupMap[g.Id] = g; });
+        rawRA.forEach(ra => {
+          if (ra.Member?.PrincipalType === 8 && ra.Member?.Id) {
+            const g = groupMap[ra.Member.Id];
+            if (g) ra.Member.Users = { results: g._users||[] };
+          }
+        });
+        roleAssignments = rawRA;
+        dbg('RoleAssignments (SP REST) geladen', {count: roleAssignments.length});
+      } catch(e) { dbg('RoleAssignments SP REST nicht verfügbar', e.message); }
+    }
 
     if (roleAssignments.length) {
       siteMembers = `<div class="perm-members" style="padding:4px 0;">${renderMembersTree(roleAssignments)}</div>`;
