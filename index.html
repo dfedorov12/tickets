@@ -1187,21 +1187,12 @@ async function refreshNewTickets() {
   const btn = $id('btn-refresh');
   if (btn) { btn.disabled=true; btn.textContent='⏳'; }
   try {
-    // Find the most recent createdDateTime we know
-    const maxDate = allTickets.reduce((m,t)=>{
-      const d = new Date(t.createdDateTime||t.fields?.Created||0);
-      return d>m?d:m;
-    }, new Date(0));
-    // Add 1 second to avoid re-fetching the exact same item
-    const afterDate = new Date(maxDate.getTime()+1000).toISOString();
-    dbg('Smart Refresh: suche nach', afterDate);
-
-    // $top without $orderby avoids List View Threshold; filter by Created >= afterDate
-    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$filter=fields/Created ge '${afterDate}'&$top=100`;
-    const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
     const existingIds = new Set(allTickets.map(t=>t.id));
+    // Simple: fetch first 50 items (no filter/orderby = no threshold issue)
+    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=50`;
+    const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
     const freshNew = (d.value||[]).filter(t=>!existingIds.has(t.id));
-    dbg('Smart Refresh: neue Items', freshNew.length);
+    dbg('Smart Refresh: incoming='+(d.value||[]).length+' new='+freshNew.length);
 
     if (freshNew.length) {
       allTickets = [...freshNew, ...allTickets];
@@ -1218,7 +1209,7 @@ async function refreshNewTickets() {
     }
   } catch(e) {
     dbg('Smart Refresh Fehler', e.message);
-    toast('Refresh: '+e.message, 'error');
+    toast('Refresh-Fehler: '+e.message, 'error');
   } finally {
     if(btn){ btn.disabled=false; btn.textContent='🔄'; }
   }
@@ -1347,18 +1338,23 @@ function openTicketDetail(id) {
       </select>
     </div>`;
 
-  // Always show assigned field at top of details (even if empty)
-  if (assignedCol) {
-    const v = f[assignedCol];
+  // Always show assigned field — try multiple known column names
+  const _assignedKey = assignedCol || col(['Zugewiesen','AssignedTo','Zugewiesen_x0020_an','Bearbeiter','ZugewiesenAn']);
+  {
+    const v = _assignedKey ? f[_assignedKey] : null;
     const nameStr = v ? personName(v) : '';
-    const fid = 'ppl_'+assignedCol.replace(/[^a-z0-9]/gi,'_');
-    html+=`<div class="field-row"><label>${esc(ticketCols[assignedCol]||'Zugewiesen an')}</label>
+    const fid = 'sb_assigned_'+id;
+    const fkKey = _assignedKey || 'AssignedTo';
+    html+=`<div class="field-row"><label>Zugewiesen an</label>
       <div style="position:relative;">
-        <input id="${fid}" data-fk-person="${esc(assignedCol)}" value="${esc(nameStr)}" style="font-size:12px;width:100%;" placeholder="Name suchen…" autocomplete="off" oninput="searchUsers(this,'${fid}_dd')"/>
-        <div id="${fid}_dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border2);border-top:none;border-radius:0 0 7px 7px;z-index:200;max-height:180px;overflow:auto;box-shadow:var(--shadow);"></div>
-        <input type="hidden" id="${fid}_id" data-fk="${esc(assignedCol)}LookupId"/>
+        <input id="${fid}" data-fk-person="${esc(fkKey)}" value="${esc(nameStr)}"
+          style="font-size:12px;width:100%;padding:8px 11px;border:1.5px solid var(--border2);border-radius:6px;outline:none;background:#fff;"
+          placeholder="Name suchen…" autocomplete="off"
+          oninput="searchUsers(this,'${fid}_dd')"/>
+        <div id="${fid}_dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border2);border-top:none;border-radius:0 0 7px 7px;z-index:201;max-height:180px;overflow:auto;box-shadow:var(--shadow);"></div>
+        <input type="hidden" id="${fid}_id" data-fk="${esc(fkKey)}LookupId"/>
       </div>
-    </div>`
+    </div>`;
   }
   // Fields to hide completely
   const skip = new Set([
@@ -1460,7 +1456,7 @@ function openTicketDetail(id) {
   $id('sb-body').innerHTML = html;
   $id('sb-actions').innerHTML = `
     <button class="btn btn-primary" onclick="saveSidebar('${id}')" style="flex:1;">✓ Speichern</button>
-    <button class="btn btn-ghost" onclick="openTicketTab('${id}')" title="In App-Tab öffnen">⊞ Tab</button>
+    <button class="btn btn-ghost" onclick="openTabFromSidebar('${id}')" title="Als Tab in Hauptansicht öffnen">⊞ Tab</button>
     <button class="btn btn-ghost" onclick="openTicketFullscreen('${id}')">⛶</button>
     <button class="btn btn-ghost"   onclick="closeSidebar()">✕</button>
     <button class="btn btn-danger"  onclick="confirmDeleteTicket('${id}')">🗑</button>`;
@@ -1510,6 +1506,21 @@ function closeSidebar() { $id('tkt-sidebar').classList.remove('open'); editingId
 let _openTabs = {};
 let _activeTabId = null;
 
+function openTabFromSidebar(id) {
+  // Open full detail panel as tab, keep sidebar closing
+  const it = allTickets.find(t=>t.id==id);
+  if (!it) return;
+  const f = it.fields||{};
+  const cTitle = getCol('title')||'Title';
+  const title = String(f[cTitle]||f.Title||'#'+id).substring(0,30);
+  _openTabs[id] = {id, title};
+  _activeTabId = id;
+  renderTabBar();
+  showTicketDetailPanel(id);
+  showPanel('ticket-detail');
+  closeSidebar();
+}
+
 function openTicketTabBg(id) {
   // Open tab in background without switching to it
   const it = allTickets.find(t=>t.id==id);
@@ -1523,16 +1534,8 @@ function openTicketTabBg(id) {
 }
 
 function openTicketTab(id) {
-  const it = allTickets.find(t=>t.id==id);
-  if (!it) { toast('Ticket nicht im Cache — bitte Refresh','error'); return; }
-  const f = it.fields||{};
-  const cTitle = getCol('title')||'Title';
-  const title  = String(f[cTitle]||f.Title||'Ticket #'+id).substring(0,30);
-  _openTabs[id] = {id, title};
-  _activeTabId  = id;
-  renderTabBar();
-  showTicketDetailPanel(id);
-  showPanel('ticket-detail');
+  // Single click = open sidebar (quick view, keep ticket list visible)
+  openTicketDetail(id);
 }
 
 function renderTabBar() {
@@ -2373,8 +2376,21 @@ function renderDevices(list, cols) {
       <td style="font-weight:600;color:var(--navy);">${i+1}</td>
       ${cols.map(c=>{
         let v = it[c.key];
-        if (typeof v === 'boolean') v = v ? '✓' : '✗';
-        else if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) v = fmt(v);
+        // Boolean badges
+        if (typeof v === 'boolean') {
+          v = v ? '<span style="background:var(--green-bg);color:var(--green);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">✓ Ja</span>'
+                : '<span style="background:var(--red-bg);color:var(--red);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">✗ Nein</span>';
+          return `<td>${v}</td>`;
+        }
+        // Compliance state badge (Intune)
+        if (c.key==='complianceState') {
+          const colors = {compliant:'var(--green)',noncompliant:'var(--red)',unknown:'#6b7280',notApplicable:'#6b7280'};
+          const labels = {compliant:'✓ Konform',noncompliant:'✗ Nicht konform',unknown:'? Unbekannt',notApplicable:'—'};
+          const col = colors[v]||'#6b7280';
+          v = `<span style="background:${col}22;color:${col};padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700;">${labels[v]||esc(String(v||'—'))}</span>`;
+          return `<td>${v}</td>`;
+        }
+        if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(v)) v = fmt(v);
         else v = esc(String(v||'—'));
         return `<td style="font-size:11px;">${v}</td>`;
       }).join('')}
@@ -3721,16 +3737,47 @@ function searchUsers(inp, ddId) {
   if (q.length < 2) { dd.style.display='none'; return; }
   _userSearchTimer = setTimeout(async ()=>{
     try {
-      const res = await gGet(`/users?$filter=startswith(displayName,'${encodeURIComponent(q)}') or startswith(mail,'${encodeURIComponent(q)}')&$select=id,displayName,mail&$top=8`);
+      // Try Graph /users first
+      const res = await gGet(`/users?$filter=startswith(displayName,'${encodeURIComponent(q)}') or startswith(mail,'${encodeURIComponent(q)}')&$select=id,displayName,mail,userPrincipalName&$top=8`);
       const users = res.value||[];
       if(!users.length){ dd.innerHTML='<div style="padding:8px 12px;font-size:11px;color:var(--text-muted);">Keine User gefunden</div>'; dd.style.display='block'; return; }
-      dd.innerHTML = users.map(u=>`<div onclick="selectUser(this,'${dd.id}')" data-name="${esc(u.displayName)}" data-mail="${esc(u.mail||u.userPrincipalName||'')}" data-aad="${esc(u.id)}"
-          style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);" onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">
+      dd.innerHTML = users.map(u=>`<div
+          style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);"
+          onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
+          data-name="${esc(u.displayName)}" data-mail="${esc(u.mail||u.userPrincipalName||'')}" data-aad="${esc(u.id)}"
+          onclick="selectUser(this,'${ddId}')">
           <div style="font-weight:600;">${esc(u.displayName)}</div>
           <div style="font-size:10px;color:var(--text-muted);">${esc(u.mail||u.userPrincipalName||'')}</div>
         </div>`).join('');
       dd.style.display='block';
-    } catch(e){ dd.innerHTML=`<div style="padding:8px 12px;font-size:11px;color:var(--red);">${esc(e.message)}</div>`; dd.style.display='block'; }
+    } catch(e){
+      // Fallback: SP people search (works with SP token)
+      try {
+        const spTok = await getSpToken();
+        const r = await fetch(`https://dihag.sharepoint.com/sites/ticket/_api/SP.UI.ApplicationPages.ClientPeoplePickerWebServiceInterface.ClientPeoplePickerSearchUser`,{
+          method:'POST',
+          headers:{Authorization:'Bearer '+spTok,'Content-Type':'application/json;odata=verbose',Accept:'application/json;odata=verbose'},
+          body:JSON.stringify({queryParams:{__metadata:{type:'SP.UI.ApplicationPages.ClientPeoplePickerQueryParameters'},AllowEmailAddresses:true,AllowMultipleEntities:false,MaximumEntitySuggestions:8,QueryString:q}})
+        });
+        if(r.ok){
+          const j=await r.json(); const raw=j?.d?.ClientPeoplePickerSearchUser||'[]';
+          const people=JSON.parse(raw); 
+          if(people.length){
+            dd.innerHTML=people.map(p=>`<div
+                style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);"
+                onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
+                data-name="${esc(p.DisplayText||p.Key||q)}" data-mail="${esc(p.EntityData?.Email||p.Key||'')}" data-aad=""
+                onclick="selectUser(this,'${ddId}')">
+                <div style="font-weight:600;">${esc(p.DisplayText||p.Key||'?')}</div>
+                <div style="font-size:10px;color:var(--text-muted);">${esc(p.EntityData?.Email||p.Description||'')}</div>
+              </div>`).join('');
+            dd.style.display='block'; return;
+          }
+        }
+      } catch{}
+      dd.innerHTML=`<div style="padding:8px 12px;font-size:11px;color:var(--red);">⚠ ${esc(e.message.substring(0,60))}</div>`;
+      dd.style.display='block';
+    }
   }, 300);
 }
 
