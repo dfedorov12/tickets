@@ -357,11 +357,15 @@ header{
         </select>
         <select class="tkt-filter-sel" id="tkt-prio" onchange="filterTickets()">
           <option value="">Alle Prioritäten</option>
-          <option>Niedrig</option><option>Normal</option><option>Mittel</option><option>Hoch</option><option>high</option><option>Kritisch</option>
+          <option value="Niedrig">Niedrig</option>
+          <option value="Normal">Normal / Mittel</option>
+          <option value="Hoch">Hoch</option>
+          <option value="Kritisch">Kritisch</option>
         </select>
         <select class="tkt-filter-sel" id="tkt-kat" onchange="filterTickets()"><option value="">Alle Kategorien</option></select>
         <select class="tkt-filter-sel" id="tkt-werk" onchange="filterTickets()"><option value="">Alle Werke</option></select>
         <select class="tkt-filter-sel" id="tkt-art" onchange="filterTickets()"><option value="">Alle Arten</option></select>
+        <select class="tkt-filter-sel" id="tkt-assigned" onchange="filterTickets()" style="max-width:160px;"><option value="">Alle Zugewiesen</option></select>
         <span id="tkt-count" style="font-size:11px;color:var(--text-muted);margin-left:4px;white-space:nowrap;"></span>
         <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
           <button onclick="toggleDebug()" id="btn-debug" style="font-size:11px;padding:4px 10px;background:none;border:1.5px solid var(--border2);border-radius:5px;cursor:pointer;">🐛 Debug: Aus</button>
@@ -424,19 +428,22 @@ header{
 
     <!-- DEVICES PANEL (Azure Geräte) -->
     <div class="panel" id="panel-devices" style="flex-direction:column;">
-      <div style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border);background:#fff;flex-shrink:0;flex-wrap:wrap;">
-        <span style="font-size:12px;font-weight:700;color:var(--navy);">💻 Azure AD Geräte</span>
-        <div style="width:1px;height:20px;background:var(--border);"></div>
-        <input class="tkt-search" id="dev-search" placeholder="🔍 Suchen…" oninput="filterDevices()" style="max-width:200px;"/>
+      <!-- Shared toolbar -->
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:2px solid var(--border);background:#fff;flex-shrink:0;">
+        <input class="tkt-search" id="dev-search" placeholder="🔍 Azure AD suchen…" oninput="filterDevices()" style="max-width:180px;"/>
         <span id="dev-count" style="font-size:11px;color:var(--text-muted);white-space:nowrap;"></span>
-        <button class="hdr-btn" onclick="loadDevices(true)" style="margin-left:auto;">🔄 Azure</button>
-        <button class="hdr-btn" onclick="loadDevSP(true)">🔄 SP-Liste</button>
+        <div style="height:20px;width:1px;background:var(--border);margin:0 4px;"></div>
+        <span id="dev-sp-count" style="font-size:11px;color:var(--text-muted);white-space:nowrap;"></span>
+        <button class="hdr-btn" onclick="loadDevices(true)" style="margin-left:auto;" title="Azure AD Geräte neu laden">🔄 Azure</button>
+        <button class="hdr-btn" onclick="loadDevSP(true)" title="SP-Liste neu laden">🔄 SP</button>
       </div>
-      <!-- Side-by-side: Azure AD (left) + SP AzureGerte (right) -->
-      <div style="flex:1;overflow:hidden;display:flex;flex-direction:row;gap:0;">
-        <!-- Azure AD half -->
-        <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;border-right:2px solid var(--border);">
-          <div style="padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--navy);">💻 Azure AD Geräte</div>
+      <!-- Side-by-side -->
+      <div style="flex:1;overflow:hidden;display:flex;flex-direction:row;">
+        <!-- Azure AD (links, 45%) -->
+        <div style="flex:0 0 45%;min-width:0;overflow:hidden;display:flex;flex-direction:column;border-right:2px solid var(--border);">
+          <div style="padding:5px 12px;background:var(--navy);color:#fff;font-size:11px;font-weight:700;flex-shrink:0;display:flex;align-items:center;gap:6px;">
+            💻 Azure AD Geräte
+          </div>
           <div class="tkt-main" style="flex:1;overflow:hidden;">
             <div style="flex:1;overflow:auto;" id="dev-table-wrap">
               <div class="empty" id="dev-empty">Lade Geräte…</div>
@@ -455,11 +462,11 @@ header{
             </div>
           </div>
         </div>
-        <!-- SP AzureGerte half -->
-        <div style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
-          <div style="padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--navy);">
+        <!-- SP AzureGerte (rechts, 55%) -->
+        <div style="flex:0 0 55%;min-width:0;overflow:hidden;display:flex;flex-direction:column;">
+          <div style="padding:5px 12px;background:var(--navy2);color:#fff;font-size:11px;font-weight:700;flex-shrink:0;display:flex;align-items:center;gap:6px;">
             📋 SP AzureGerte-Liste
-            <a href="https://dihag.sharepoint.com/sites/IT/Lists/AzureGerte/AllItems.aspx" target="_blank" style="font-size:10px;color:var(--blue);font-weight:400;margin-left:8px;">↗ In SP öffnen</a>
+            <a href="https://dihag.sharepoint.com/sites/IT/Lists/AzureGerte/AllItems.aspx" target="_blank" style="font-size:10px;color:rgba(255,255,255,.7);font-weight:400;margin-left:auto;text-decoration:none;">↗ In SharePoint</a>
           </div>
           <div class="tkt-main" style="flex:1;overflow:hidden;">
             <div style="flex:1;overflow:auto;" id="dev-sp-table-wrap">
@@ -570,7 +577,6 @@ header{
     <div class="fs-body" id="fs-body"></div>
     <div class="fs-footer">
       <button class="btn btn-primary" id="fs-save" onclick="saveFullscreen()">✓ Speichern</button>
-      <button class="btn btn-danger" id="fs-delete">🗑 Löschen</button>
       <div class="fs-status-changer" id="fs-status-changer"></div>
     </div>
   </div>
@@ -999,7 +1005,8 @@ function filterActive() {
             $id('tkt-prio').value ||
             ($id('tkt-kat')?.value||'') ||
             ($id('tkt-werk')?.value||'') ||
-            ($id('tkt-art')?.value||''));
+            ($id('tkt-art')?.value||'') ||
+            ($id('tkt-assigned')?.value||''));
 }
 
 function sortByCreatedDesc(tickets) {
@@ -1041,7 +1048,8 @@ function renderTickets(list) {
   tbody.innerHTML = list.map(it => {
     const f = it.fields || {};
     const status = f[cStatus] || f.Status || '';
-    const prio = cPrio ? (f[cPrio]||'') : '';
+    const _prioRaw = cPrio ? (f[cPrio]||'') : '';
+    const prio = _prioRaw.replace(/^high$/i,'Hoch').replace(/^normal$/i,'Normal').replace(/^mittel$/i,'Normal').replace(/^Mittel$/,'Normal');
     const assigned = cAssigned ? personName(f[cAssigned]) : '';
     const kat = cKat ? (f[cKat]||'') : '';
     const werk = cWerk ? (f[cWerk]||'') : '';
@@ -1188,11 +1196,28 @@ async function refreshNewTickets() {
   if (btn) { btn.disabled=true; btn.textContent='⏳'; }
   try {
     const existingIds = new Set(allTickets.map(t=>t.id));
-    // Simple: fetch first 50 items (no filter/orderby = no threshold issue)
-    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=50`;
-    const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
-    const freshNew = (d.value||[]).filter(t=>!existingIds.has(t.id));
-    dbg('Smart Refresh: incoming='+(d.value||[]).length+' new='+freshNew.length);
+    // Fetch last 100 items by SP item ID (highest ID = newest) — no filter/orderby needed
+    // SP returns items in ID ascending order by default, so we get the newest on the last page
+    // Use $skiptoken trick: fetch two pages, combine, dedup
+    const url1 = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100`;
+    const d1 = await gGet(url1, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
+    let incoming = d1.value||[];
+    // If there's a next page, also fetch it (catches large lists where new items are on last page)
+    if (d1['@odata.nextLink']) {
+      try {
+        let nUrl = d1['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','');
+        // Keep following until no more nextLink or we have enough
+        let pages = 0;
+        while (nUrl && pages < 10) {
+          const dn = await gGet(nUrl, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
+          incoming = [...incoming, ...(dn.value||[])];
+          nUrl = dn['@odata.nextLink'] ? dn['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+          pages++;
+        }
+      } catch(e2) { dbg('Refresh paging error', e2.message); }
+    }
+    const freshNew = incoming.filter(t=>!existingIds.has(t.id));
+    dbg('Smart Refresh: incoming='+incoming.length+' new='+freshNew.length);
 
     if (freshNew.length) {
       allTickets = [...freshNew, ...allTickets];
@@ -1252,6 +1277,16 @@ async function loadOlderTicketsInBackground(recentDate) {
 }
 
 
+// Normalise prio value for consistent comparison
+function normPrio(v) {
+  const s = String(v||'').trim();
+  if (/^high$/i.test(s)||/^hoch$/i.test(s)) return 'Hoch';
+  if (/^normal$/i.test(s)||/^mittel$/i.test(s)) return 'Normal';
+  if (/^niedrig$/i.test(s)||/^low$/i.test(s)) return 'Niedrig';
+  if (/^kritisch$/i.test(s)||/^critical$/i.test(s)) return 'Kritisch';
+  return s;
+}
+
 function applyFilters(list) {
   const raw  = ($id('tkt-search').value||'').trim();
   const q    = raw.toLowerCase();
@@ -1260,20 +1295,23 @@ function applyFilters(list) {
   const kat  = $id('tkt-kat')?.value||'';
   const wrk  = $id('tkt-werk')?.value||'';
   const art  = $id('tkt-art')?.value||'';
+  const asgn = $id('tkt-assigned')?.value||'';
   const cStatus=getCol('status')||'Status';
   const cPrio  =getCol('prio');
   const cKat   =getCol('category');
   const cWerk  =getCol('werk');
   const cType  =getCol('type');
   const cTitle =getCol('title')||'Title';
+  const cAsgn  =getCol('assigned');
   return list.filter(it=>{
     const f=it.fields||{};
     const idStr=String(it.id);
     const titleStr=(f[cTitle]||f.Title||'').toLowerCase();
     const searchOk=!q||(q.replace(/^#/,'')===idStr)||(idStr.includes(q.replace(/^#/,'')))||titleStr.includes(q);
-    return searchOk
+    const prioOk = !pr||!cPrio||normPrio(f[cPrio])===pr;
+    const asgnOk = !asgn||!cAsgn||personName(f[cAsgn]).toLowerCase().includes(asgn.toLowerCase());
+    return searchOk&&prioOk&&asgnOk
       &&(!st||(f[cStatus]||'').includes(st))
-      &&(!pr||!cPrio||(f[cPrio]||'').includes(pr))
       &&(!kat||!cKat||(f[cKat]||'')===kat)
       &&(!wrk||!cWerk||(f[cWerk]||'')===wrk)
       &&(!art||!cType||(f[cType]||'')===art);
@@ -1284,21 +1322,26 @@ function buildFilterOptions(tickets) {
   const cKat  = getCol('category');
   const cWerk = getCol('werk');
   const cType = getCol('type');
-  const sets  = {kat:new Set(), werk:new Set(), art:new Set()};
+  const cAsgn = getCol('assigned');
+  const sets  = {kat:new Set(), werk:new Set(), art:new Set(), assigned:new Set()};
   tickets.forEach(it=>{
     const f=it.fields||{};
     if(cKat  && f[cKat])  sets.kat.add(String(f[cKat]));
     if(cWerk && f[cWerk]) sets.werk.add(String(f[cWerk]));
     if(cType && f[cType]) sets.art.add(String(f[cType]));
+    if(cAsgn && f[cAsgn]){ const n=personName(f[cAsgn]); if(n) sets.assigned.add(n); }
   });
-  const fill=(id,set)=>{
+  const fill=(id,set,label)=>{
     const sel=$id(id); if(!sel) return;
     const cur=sel.value;
-    sel.innerHTML='<option value="">'+sel.options[0].text+'</option>';
+    sel.innerHTML='<option value="">'+label+'</option>';
     [...set].sort().forEach(v=>{ const o=document.createElement('option'); o.value=o.textContent=v; sel.appendChild(o); });
     sel.value=cur;
   };
-  fill('tkt-kat',sets.kat); fill('tkt-werk',sets.werk); fill('tkt-art',sets.art);
+  fill('tkt-kat',sets.kat,'Alle Kategorien');
+  fill('tkt-werk',sets.werk,'Alle Werke');
+  fill('tkt-art',sets.art,'Alle Arten');
+  fill('tkt-assigned',sets.assigned,'Alle Zugewiesen');
 }
 
 function filterTickets() {
@@ -1458,8 +1501,7 @@ function openTicketDetail(id) {
     <button class="btn btn-primary" onclick="saveSidebar('${id}')" style="flex:1;">✓ Speichern</button>
     <button class="btn btn-ghost" onclick="openTabFromSidebar('${id}')" title="Als Tab in Hauptansicht öffnen">⊞ Tab</button>
     <button class="btn btn-ghost" onclick="openTicketFullscreen('${id}')">⛶</button>
-    <button class="btn btn-ghost"   onclick="closeSidebar()">✕</button>
-    <button class="btn btn-danger"  onclick="confirmDeleteTicket('${id}')">🗑</button>`;
+    <button class="btn btn-ghost"   onclick="closeSidebar()">✕</button>`;
 
   sidebar.classList.add('open');
   // Fetch attachments async via SP REST
@@ -1627,7 +1669,6 @@ function showTicketDetailPanel(id) {
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
       <div style="font-size:20px;font-weight:700;color:var(--navy);flex:1;">Ticket #${id} — ${titleText}</div>
       <button class="btn btn-primary" onclick="saveDetailTab('${id}')">✓ Speichern</button>
-      <button class="btn btn-danger" onclick="confirmDeleteTicket('${id}')">🗑</button>
     </div>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;">
       <span class="st-badge" id="dt-status-badge-${id}" style="font-size:13px;padding:5px 16px;background:${stColor}22;color:${stColor};">${esc(curStatus)}</span>
@@ -1797,7 +1838,6 @@ function openTicketFullscreen(id) {
 
   $id('fs-title').textContent = `Ticket #${id}`;
   $id('fs-status-badge').innerHTML = `<span class="fs-status-current" style="background:${stColors[curStatus]||'#666'}22;color:${stColors[curStatus]||'#666'};">${esc(curStatus)}</span>`;
-  $id('fs-delete').onclick = ()=>{ closeFullscreen(); confirmDeleteTicket(id); };
 
   // Status changer in footer as dropdown
   $id('fs-status-changer').innerHTML = `<span style="font-size:10px;color:var(--text-muted);margin-right:4px;">Status ändern:</span>
@@ -2225,6 +2265,17 @@ function buildReports() {
     </div>`;
   }
 
+  // Top-10 Zugewiesen an
+  const cAsgn = getCol('assigned');
+  if (cAsgn) {
+    const asgnData = countBy(allTickets, t=>personName((t.fields||{})[cAsgn])||'(Nicht zugewiesen)');
+    const top10 = asgnData.slice(0,10);
+    html += `<div class="rpt-card rpt-card-full">
+      <div class="rpt-title">👤 Top 10 — Zugewiesen an</div>
+      ${barChart(top10, (l)=>l==='(Nicht zugewiesen)'?'#94a3b8':'var(--navy)')}
+    </div>`;
+  }
+
   html += '</div>';
 
   c.innerHTML = html;
@@ -2519,7 +2570,7 @@ function renderDevSP(list) {
       }).join('')}
     </tr>`;
   }).join('');
-  $id('dev-count').textContent = list.length+' SP-Einträge';
+  const spCntEl=$id('dev-sp-count'); if(spCntEl) spCntEl.textContent=list.length+' SP-Einträge';
   empty.style.display='none'; table.style.display='';
 }
 
