@@ -884,34 +884,40 @@ function slimTicket(t) {
 
 function saveTicketCache() {
   try {
-    sessionStorage.removeItem('dihag_tickets');
-    const slim = allTickets.slice(0,300).map(slimTicket);
-    sessionStorage.setItem('dihag_tickets', JSON.stringify(slim));
-    sessionStorage.setItem('dihag_ticketCols', JSON.stringify(ticketCols));
-    sessionStorage.setItem('dihag_ticketIds', JSON.stringify({siteId:ticketSiteId,listId:ticketListId}));
-    dbg('Cache gespeichert', {tickets: slim.length});
+    localStorage.removeItem('dihag_tickets');
+    const slim = allTickets.slice(0,500).map(slimTicket);
+    const data = JSON.stringify(slim);
+    localStorage.setItem('dihag_tickets', data);
+    localStorage.setItem('dihag_ticketCols', JSON.stringify(ticketCols));
+    localStorage.setItem('dihag_ticketIds', JSON.stringify({siteId:ticketSiteId,listId:ticketListId}));
+    localStorage.setItem('dihag_ticketTime', Date.now().toString());
+    dbg('Cache gespeichert (localStorage)', {tickets: slim.length, bytes: data.length});
   } catch(e) {
-    dbg('Cache-Fehler (ignoriert)', e.message);
-    try { sessionStorage.clear(); } catch{}
+    dbg('Cache-Fehler', e.message);
+    try { localStorage.removeItem('dihag_tickets'); } catch{}
   }
 }
 
 function restoreTicketCache() {
   try {
-    const raw = sessionStorage.getItem('dihag_tickets');
-    const colsRaw = sessionStorage.getItem('dihag_ticketCols');
-    const idsRaw = sessionStorage.getItem('dihag_ticketIds');
-    if (raw && colsRaw && idsRaw) {
-      allTickets = JSON.parse(raw);
-      ticketCols = JSON.parse(colsRaw);
-      const ids = JSON.parse(idsRaw);
-      ticketSiteId = ids.siteId;
-      ticketListId = ids.listId;
-      dbg('Cache wiederhergestellt', {tickets: allTickets.length});
-      return true;
+    const raw     = localStorage.getItem('dihag_tickets');
+    const colsRaw = localStorage.getItem('dihag_ticketCols');
+    const idsRaw  = localStorage.getItem('dihag_ticketIds');
+    const tsRaw   = localStorage.getItem('dihag_ticketTime');
+    if (!raw || !colsRaw || !idsRaw) return false;
+    // Invalidate cache older than 2 hours
+    if (tsRaw && (Date.now() - parseInt(tsRaw)) > 2*3600*1000) {
+      dbg('Cache abgelaufen (>2h), verwerfe');
+      return false;
     }
-  } catch(e) { dbg('Cache-Restore-Fehler', e.message); }
-  return false;
+    allTickets = JSON.parse(raw);
+    ticketCols = JSON.parse(colsRaw);
+    const ids = JSON.parse(idsRaw);
+    ticketSiteId = ids.siteId;
+    ticketListId = ids.listId;
+    dbg('Cache wiederhergestellt', {tickets: allTickets.length});
+    return true;
+  } catch(e) { dbg('Cache-Restore-Fehler', e.message); return false; }
 }
 
 function filterActive() {
@@ -1326,6 +1332,7 @@ function openTicketDetail(id) {
   $id('sb-body').innerHTML = html;
   $id('sb-actions').innerHTML = `
     <button class="btn btn-primary" onclick="saveSidebar('${id}')" style="flex:1;">✓ Speichern</button>
+    <button class="btn btn-ghost" onclick="openTicketNewTab('${id}')" title="In neuem Browser-Tab öffnen">🔗 Tab</button>
     <button class="btn btn-ghost" onclick="openTicketFullscreen('${id}')">⛶ Vollbild</button>
     <button class="btn btn-ghost"   onclick="closeSidebar()">Schließen</button>
     <button class="btn btn-danger"  onclick="confirmDeleteTicket('${id}')">🗑</button>`;
@@ -1370,6 +1377,93 @@ async function fetchTicketAttachments(id) {
 }
 
 function closeSidebar() { $id('tkt-sidebar').classList.remove('open'); editingId=null; }
+
+function openTicketNewTab(id) {
+  const it = allTickets.find(t=>t.id==id);
+  if (!it) return;
+  const f = it.fields||{};
+  const cTitle  = getCol('title')||'Title';
+  const cStatus = getCol('status')||'Status';
+  const cPrio   = getCol('prio');
+  const cAssign = getCol('assigned');
+  const cDesc   = getCol('desc');
+  const cWerk   = getCol('werk');
+  const cKat    = getCol('category');
+  const stColors = {Offen:'#2563eb',Neu:'#6366f1','In Bearbeitung':'#d97706','Warten auf Rückmeldung':'#ea580c',Erledigt:'#16a34a',Abgebrochen:'#6b7280'};
+  const status = f[cStatus]||'Offen';
+  const stColor = stColors[status]||'#6b7280';
+
+  const skipKeys = new Set(['_UIVersionString','ContentType','Attachments','ID','AuthorLookupId',
+    'EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount',
+    'FolderChildCount','ComplianceAssetId','@odata.etag']);
+
+  let fieldsHtml = '';
+  Object.entries(f).forEach(([k,v])=>{
+    if(skipKeys.has(k)||k.startsWith('_')||k.startsWith('@odata')||v===null||v===undefined||v==='') return;
+    if(k===cStatus) return;
+    const label = ticketCols[k]||k;
+    let display;
+    if(k===cDesc||isRichText(v)) display=`<div style="padding:10px;background:#f8fafc;border-radius:6px;font-size:13px;line-height:1.7;">${cleanHtml(v)}</div>`;
+    else if(Array.isArray(v)||typeof v==='string'&&v.startsWith('[')) display=`<div style="font-size:13px;">${esc(personName(v))}</div>`;
+    else if(typeof v==='string'&&/^\d{4}-\d{2}-\d{2}T/.test(v)) display=`<div style="font-size:13px;">${fmtFull(v)}</div>`;
+    else if(typeof v==='object') display=`<div style="font-size:13px;">${esc(v?.LookupValue||v?.displayName||v?.Title||v?.Email||JSON.stringify(v))}</div>`;
+    else display=`<div style="font-size:13px;">${esc(String(v))}</div>`;
+    fieldsHtml+=`<div style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;color:#6b7a8f;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">${esc(label)}</div>${display}</div>`;
+  });
+
+  const html=`<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Ticket #${id} — ${esc(f[cTitle]||'')}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Inter,sans-serif;background:#f2f4f7;color:#1a2942;min-height:100vh;}
+.header{background:#0a1f3c;color:#fff;padding:16px 32px;display:flex;align-items:center;gap:16px;}
+.header-title{font-size:20px;font-weight:700;}
+.badge{display:inline-flex;align-items:center;padding:4px 14px;border-radius:10px;font-size:12px;font-weight:700;}
+.content{max-width:900px;margin:32px auto;padding:0 24px;}
+.card{background:#fff;border-radius:12px;padding:28px;box-shadow:0 2px 12px rgba(10,31,60,.09);margin-bottom:20px;}
+.card-title{font-size:13px;font-weight:700;color:#0a1f3c;text-transform:uppercase;letter-spacing:.05em;margin-bottom:16px;padding-bottom:8px;border-bottom:1.5px solid #e5e8ed;}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+@media(max-width:600px){.two-col{grid-template-columns:1fr;}}
+.field-label{font-size:10px;font-weight:700;color:#6b7a8f;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;}
+.print-btn{background:#0a1f3c;color:#fff;border:none;padding:8px 20px;border-radius:6px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;margin-right:8px;}
+@media print{.no-print{display:none!important;}.header{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
+</style></head><body>
+<div class="header">
+  <div>
+    <div style="font-size:11px;opacity:.6;margin-bottom:2px;">DIHAG · Ticketsystem</div>
+    <div class="header-title">Ticket #${id}</div>
+  </div>
+  <span class="badge" style="background:${stColor}22;color:${stColor};margin-left:12px;">${esc(status)}</span>
+  <div style="margin-left:auto;" class="no-print">
+    <button class="print-btn" onclick="window.print()">🖨 Drucken</button>
+    <button class="print-btn" style="background:#16345a;" onclick="window.close()">✕ Schließen</button>
+  </div>
+</div>
+<div class="content">
+  <div class="card">
+    <div style="font-size:22px;font-weight:700;color:#0a1f3c;margin-bottom:6px;">${esc(f[cTitle]||f.Title||'Ohne Titel')}</div>
+    <div style="font-size:12px;color:#6b7a8f;">Erstellt: ${fmtFull(it.createdDateTime)}
+      ${cAssign&&f[cAssign]?` · Zugewiesen: ${esc(personName(f[cAssign]))}`:''}</div>
+  </div>
+  <div class="card">
+    <div class="card-title">Details</div>
+    <div class="two-col">${fieldsHtml}</div>
+  </div>
+  <div class="card" style="font-size:11px;color:#9ba8b8;">
+    Ticket-ID: ${id} · Site: ${esc(ticketSiteId||'')} · Exportiert: ${fmtFull(new Date().toISOString())}
+  </div>
+</div>
+</body></html>`;
+
+  const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const tab = window.open(url,'_blank');
+  if (tab) setTimeout(()=>URL.revokeObjectURL(url), 10000);
+  else { toast('Popup blockiert — bitte Popup-Blocker deaktivieren','error'); }
+}
 
 let fullscreenId = null;
 
@@ -2430,76 +2524,149 @@ async function loadFolderPermsTree() {
 
       let html = '';
 
-      // Show files first (flat list)
+      // Root-level files: check unique perms per file
       if (files.length) {
-        html += `<div style="font-size:9px;font-weight:700;color:var(--text-muted);padding:4px 0 4px 6px;">Dateien (${files.length}):</div>`;
-        html += files.map(f=>`<div style="display:flex;align-items:center;gap:7px;padding:4px 8px;font-size:11px;border-radius:5px;margin-bottom:2px;">
-          <span>${dmsFileIconPerm(f.name)}</span>
-          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(f.name)}</span>
-          <span style="font-size:10px;color:var(--text-muted);">${dmsFormatBytesPerm(f.size||0)}</span>
-          ${f.webUrl?`<a href="${esc(f.webUrl)}" target="_blank" style="font-size:10px;color:var(--blue);text-decoration:none;">↗</a>`:''}
-        </div>`).join('');
+        html += `<div style="font-size:9px;font-weight:700;color:var(--text-muted);padding:6px 0 4px 0;">📄 Dateien in Bibliothek (${files.length}):</div>`;
+        for (const f of files) {
+          const filePermsHtml = await getItemPermsHtml(f.webUrl, driveId, f.id);
+          const uTag = filePermsHtml
+            ? '<span class="tree-badge" style="background:var(--red-bg);color:var(--red);">⚠ Eigene</span>'
+            : '<span class="tree-badge" style="background:var(--green-bg);color:var(--green);">✓ Vererbt</span>';
+          html += treeNode(dmsFileIconPerm(f.name),
+            `${esc(f.name)} <span style="font-size:10px;color:var(--text-muted);">${dmsFormatBytesPerm(f.size||0)}</span>`,
+            uTag + (f.webUrl?`<a href="${esc(f.webUrl)}" target="_blank" style="font-size:10px;color:var(--blue);text-decoration:none;margin-left:6px;">↗</a>`:''),
+            filePermsHtml || '<div class="tree-loading" style="font-size:10px;">Berechtigungen vererbt</div>');
+        }
       }
-      for (const folder of folders) {
-        let uTag='', permsHtml='';
-        try {
-          const relUrl = new URL(folder.webUrl).pathname;
-          const fp = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(relUrl)}')/ListItemAllFields?$select=HasUniqueRoleAssignments`);
-          if (fp.d?.HasUniqueRoleAssignments) {
-            uTag='<span class="tree-badge" style="background:var(--red-bg);color:var(--red);">⚠ Eigene</span>';
-            try {
-              const ra = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(relUrl)}')/ListItemAllFields/roleassignments?$expand=Member,RoleDefinitionBindings`);
-              permsHtml=`<div class="perm-members" style="padding:2px 0 2px 6px;">${renderMembersTree(ra.d?.results||[])}</div>`;
-            } catch{}
-          } else { uTag='<span class="tree-badge" style="background:var(--green-bg);color:var(--green);">✓ Vererbt</span>'; }
-        } catch { uTag=''; }
 
-        // Stufe 4: sub-folders
-        let subHtml = '';
-        try {
-          const sub = await gGet(`/drives/${driveId}/items/${folder.id}/children?$top=100`);
-          const subF = (sub.value||[]).filter(f=>f.folder);
-          subHtml = subF.map(sf => {
-            // We'll load sub-perms lazily — just show the node
-            const sfId = 'sf_'+sf.id.replace(/[^a-zA-Z0-9]/g,'');
-            return treeNode('📄', esc(sf.name)+` <span style="font-size:10px;color:var(--text-muted);">(${sf.folder.childCount})</span>`,
-              `<span class="tree-badge" style="background:var(--bg);color:var(--text-dim);">Stufe 4</span>`,
-              `<div id="${sfId}" class="tree-loading"><span class="perm-spinner"></span> Prüfe…</div>`, sfId+'_w');
-            // Fire background check
-            setTimeout(()=>checkSubFolderPerm(sfId, sf.webUrl), 100);
-            return '';  // placeholder, will be replaced
-          }).join('');
-          // Actually build properly
-          subHtml = '';
-          for (const sf of subF) {
-            let sfTag='', sfPerms='';
-            try {
-              const sfRelUrl = new URL(sf.webUrl).pathname;
-              const sfP = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(sfRelUrl)}')/ListItemAllFields?$select=HasUniqueRoleAssignments`);
-              if (sfP.d?.HasUniqueRoleAssignments) {
-                sfTag='<span class="tree-badge" style="background:var(--red-bg);color:var(--red);">⚠ Eigene</span>';
-                try {
-                  const sfRA = await spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(sfRelUrl)}')/ListItemAllFields/roleassignments?$expand=Member,RoleDefinitionBindings`);
-                  sfPerms=`<div class="perm-members" style="padding:2px 0;">${renderMembersTree(sfRA.d?.results||[])}</div>`;
-                } catch{}
-              } else { sfTag='<span class="tree-badge" style="background:var(--green-bg);color:var(--green);">✓</span>'; }
-            } catch {}
-            subHtml += treeNode('📄', esc(sf.name), sfTag, sfPerms||'<div class="tree-loading">Vererbt</div>');
-          }
-        } catch {}
+      // Folders (Stufe 3)
+      if (folders.length) {
+        html += `<div style="font-size:9px;font-weight:700;color:var(--text-muted);padding:6px 0 4px 0;">📁 Ordner — Stufe 3:</div>`;
+        for (const folder of folders) {
+          const folderPermsHtml = await getItemPermsHtml(folder.webUrl);
+          const uTag = folderPermsHtml
+            ? '<span class="tree-badge" style="background:var(--red-bg);color:var(--red);">⚠ Eigene</span>'
+            : '<span class="tree-badge" style="background:var(--green-bg);color:var(--green);">✓ Vererbt</span>';
 
-        const children = permsHtml + (subHtml?`<div style="font-size:9px;font-weight:700;color:var(--text-muted);padding:4px 0 2px 6px;">Stufe 4 — Unterordner:</div>`+subHtml:'');
-        html += treeNode('📂', `${esc(folder.name)} <span style="font-size:10px;color:var(--text-muted);">(${folder.folder.childCount})</span>`,
-          uTag||'', children||'<div class="tree-loading">—</div>');
+          // Stufe 4: subfolders + files inside
+          let subHtml = '';
+          try {
+            const sub = await gGet(`/drives/${driveId}/items/${folder.id}/children?$top=200`);
+            const subItems = sub.value||[];
+            const subFolders = subItems.filter(i=>i.folder);
+            const subFiles   = subItems.filter(i=>!i.folder);
+
+            // Sub-files with unique perms
+            if (subFiles.length) {
+              subHtml += `<div style="font-size:9px;font-weight:700;color:var(--text-muted);padding:4px 0 2px 0;">📄 Dateien (${subFiles.length}):</div>`;
+              for (const sf of subFiles) {
+                const sfPH = await getItemPermsHtml(sf.webUrl);
+                const sfTag = sfPH
+                  ? '<span class="tree-badge" style="background:var(--red-bg);color:var(--red);">⚠ Eigene</span>'
+                  : '<span class="tree-badge" style="background:var(--green-bg);color:var(--green);">✓</span>';
+                subHtml += treeNode(dmsFileIconPerm(sf.name),
+                  `${esc(sf.name)} <span style="font-size:10px;color:var(--text-muted);">${dmsFormatBytesPerm(sf.size||0)}</span>`,
+                  sfTag + (sf.webUrl?`<a href="${esc(sf.webUrl)}" target="_blank" style="font-size:10px;color:var(--blue);text-decoration:none;margin-left:6px;">↗</a>`:''),
+                  sfPH || '<div class="tree-loading" style="font-size:10px;">Vererbt</div>');
+              }
+            }
+
+            // Sub-folders (Stufe 4)
+            if (subFolders.length) {
+              subHtml += `<div style="font-size:9px;font-weight:700;color:var(--text-muted);padding:4px 0 2px 0;">📁 Unterordner — Stufe 4:</div>`;
+              for (const sf of subFolders) {
+                const sfPH = await getItemPermsHtml(sf.webUrl);
+                const sfTag = sfPH
+                  ? '<span class="tree-badge" style="background:var(--red-bg);color:var(--red);">⚠ Eigene</span>'
+                  : '<span class="tree-badge" style="background:var(--green-bg);color:var(--green);">✓</span>';
+                subHtml += treeNode('📂',
+                  `${esc(sf.name)} <span style="font-size:10px;color:var(--text-muted);">(${sf.folder?.childCount||0})</span>`,
+                  sfTag, sfPH || '<div class="tree-loading" style="font-size:10px;">Vererbt</div>');
+              }
+            }
+          } catch(e2) { dbg('Stufe 4 Fehler', e2.message); }
+
+          const children = (folderPermsHtml||'') + subHtml || '<div class="tree-loading">—</div>';
+          html += treeNode('📂',
+            `${esc(folder.name)} <span style="font-size:10px;color:var(--text-muted);">(${folder.folder.childCount})</span>`,
+            uTag, children);
+        }
       }
-      container.innerHTML = `<div style="font-size:9px;font-weight:700;color:var(--text-muted);padding:4px 0 2px;">Stufe 3 — Ordner (1. Ebene):</div>` + html;
-      dbg(`Stufe 3+4: "${lib.Title}" fertig`, {ordner: folders.length});
+
+      // Sharing links button (on demand)
+      const slBtnId = 'sl_'+lib.Id.replace(/-/g,'');
+      html += `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);">
+        <button onclick="loadSharingLinks('${esc(driveId)}','${slBtnId}')" id="${slBtnId}_btn"
+          style="font-size:11px;padding:4px 12px;background:none;border:1.5px solid var(--border2);border-radius:5px;cursor:pointer;color:var(--text-dim);">
+          🔗 Sharing Links anzeigen
+        </button>
+        <div id="${slBtnId}" style="display:none;margin-top:8px;"></div>
+      </div>`;
+
+      container.innerHTML = html;
+      dbg(`Stufe 3+4: "${lib.Title}" fertig`);
     } catch(e) {
       if(container) container.innerHTML=`<span style="font-size:10px;color:var(--red);">${esc(e.message)}</span>`;
     }
   }
-  $id('perm-status').textContent = `✓ Alle 4 Stufen geladen`;
+  $id('perm-status').textContent = `✓ Alle Stufen geladen`;
   dbg('Berechtigungs-Scan komplett ✓');
+}
+
+// Helper: get unique role assignments for a SharePoint item by webUrl
+async function getItemPermsHtml(webUrl, driveId, itemId) {
+  if (!webUrl) return '';
+  try {
+    const relUrl = new URL(webUrl).pathname;
+    const fp = await spGet(`${permSiteUrl}/_api/web/GetFileByServerRelativeUrl('${encodeURIComponent(relUrl)}')/ListItemAllFields?$select=HasUniqueRoleAssignments`).catch(()=>
+      spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(relUrl)}')/ListItemAllFields?$select=HasUniqueRoleAssignments`)
+    );
+    if (!fp.d?.HasUniqueRoleAssignments) return '';
+    // Has unique perms — fetch them
+    const ra = await spGet(`${permSiteUrl}/_api/web/GetFileByServerRelativeUrl('${encodeURIComponent(relUrl)}')/ListItemAllFields/roleassignments?$expand=Member,RoleDefinitionBindings`).catch(()=>
+      spGet(`${permSiteUrl}/_api/web/GetFolderByServerRelativeUrl('${encodeURIComponent(relUrl)}')/ListItemAllFields/roleassignments?$expand=Member,RoleDefinitionBindings`)
+    );
+    const results = ra.d?.results||[];
+    // Enrich group users
+    for (const r of results) {
+      if (r.Member?.PrincipalType===8 && r.Member?.Id) {
+        try { const gu=await spGet(`${permSiteUrl}/_api/web/sitegroups(${r.Member.Id})/users?$top=100`); r.Member.Users={results:gu.d?.results||[]}; } catch{}
+      }
+    }
+    return `<div class="perm-members" style="padding:2px 0 2px 6px;">${renderMembersTree(results)}</div>`;
+  } catch { return ''; }
+}
+
+// Sharing links: load on demand
+async function loadSharingLinks(driveId, containerId) {
+  const btn = $id(containerId+'_btn');
+  const box = $id(containerId);
+  if (!btn||!box) return;
+  btn.disabled=true; btn.textContent='⏳ Lade…';
+  try {
+    // Graph: list sharing links via permissions endpoint for drive root
+    const r = await gGet(`/drives/${driveId}/root/permissions?$top=100`);
+    const links = (r.value||[]).filter(p=>p.link);
+    if (!links.length) {
+      box.innerHTML='<div style="font-size:11px;color:var(--text-muted);">Keine aktiven Sharing Links gefunden</div>';
+    } else {
+      box.innerHTML='<div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px;">🔗 '+links.length+' Sharing Link(s):</div>'+
+        links.map(l=>`<div style="padding:5px 8px;background:var(--bg);border-radius:6px;margin-bottom:4px;font-size:11px;">
+          <span style="font-weight:600;">${esc(l.link?.type||'Link')}</span>
+          <span style="color:var(--text-muted);margin-left:8px;">${esc(l.link?.scope||'')}</span>
+          ${l.link?.webUrl?`<a href="${esc(l.link.webUrl)}" target="_blank" style="margin-left:8px;color:var(--blue);">↗</a>`:''}
+          ${l.grantedToIdentitiesV2?.length?`<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">Geteilt mit: ${l.grantedToIdentitiesV2.map(g=>esc(g.user?.displayName||g.group?.displayName||'')).filter(Boolean).join(', ')}</div>`:''}
+        </div>`).join('');
+    }
+    box.style.display='block';
+    btn.textContent='🔗 Sharing Links verbergen';
+    btn.onclick=()=>{ box.style.display=box.style.display==='none'?'block':'none'; btn.textContent=box.style.display==='none'?'🔗 Sharing Links anzeigen':'🔗 Sharing Links verbergen'; };
+    btn.disabled=false;
+  } catch(e) {
+    box.innerHTML=`<div style="font-size:11px;color:var(--red);">⚠ ${esc(e.message)}</div>`;
+    box.style.display='block';
+    btn.textContent='🔗 Sharing Links anzeigen'; btn.disabled=false;
+  }
 }
 
 // ════════════════════════════════════════════════════════════════
