@@ -423,31 +423,55 @@ header{
     </div>
 
     <!-- DEVICES PANEL (Azure Geräte) -->
-    <div class="panel" id="panel-devices">
-      <div class="tkt-toolbar">
-        <input class="tkt-search" id="dev-search" placeholder="🔍 Gerät suchen…" oninput="filterDevices()" style="flex:1;max-width:340px;"/>
-        <span id="dev-count" style="font-size:11px;color:var(--text-muted);margin-left:4px;white-space:nowrap;"></span>
-        <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
-          <a href="https://dihag.sharepoint.com/sites/IT/Lists/AzureGerte/AllItems.aspx" target="_blank" class="hdr-btn" style="text-decoration:none;" title="In SharePoint öffnen">📋 SP-Liste</a>
+    <div class="panel" id="panel-devices" style="flex-direction:column;">
+      <!-- Tabs: Azure AD | SP Liste -->
+      <div style="display:flex;align-items:center;gap:0;border-bottom:2px solid var(--border);background:#fff;flex-shrink:0;">
+        <button id="dev-tab-azure" onclick="switchDevTab('azure')" style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:12px;font-weight:700;color:var(--navy);border-bottom:3px solid var(--navy);cursor:pointer;margin-bottom:-2px;">💻 Azure AD Geräte</button>
+        <button id="dev-tab-sp"    onclick="switchDevTab('sp')"    style="padding:10px 20px;border:none;background:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--text-dim);cursor:pointer;margin-bottom:-2px;">📋 SP AzureGerte-Liste</button>
+        <div style="margin-left:auto;padding-right:12px;display:flex;gap:6px;">
+          <input class="tkt-search" id="dev-search" placeholder="🔍 Suchen…" oninput="filterDevices()" style="max-width:220px;"/>
+          <span id="dev-count" style="font-size:11px;color:var(--text-muted);align-self:center;white-space:nowrap;"></span>
           <button class="hdr-btn" onclick="loadDevices(true)">🔄</button>
         </div>
       </div>
-      <div class="tkt-main">
-        <div style="flex:1;overflow:auto;" id="dev-table-wrap">
-          <div class="empty" id="dev-empty">Lade Geräte…</div>
-          <table class="tkt-table" id="dev-table" style="display:none;">
-            <thead><tr id="dev-thead"></tr></thead>
-            <tbody id="dev-tbody"></tbody>
-          </table>
-        </div>
-        <!-- DEVICE DETAIL SIDEBAR -->
-        <div class="tkt-sidebar" id="dev-sidebar">
-          <div class="tkt-sidebar-hdr">
-            <div style="font-size:14px;font-weight:700;color:var(--navy);" id="dev-sb-title">Gerät</div>
-            <button class="tkt-close" onclick="closeDevSidebar()">✕</button>
+      <!-- Azure AD panel -->
+      <div id="dev-pane-azure" style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
+        <div class="tkt-main">
+          <div style="flex:1;overflow:auto;" id="dev-table-wrap">
+            <div class="empty" id="dev-empty">Lade Geräte…</div>
+            <table class="tkt-table" id="dev-table" style="display:none;">
+              <thead><tr id="dev-thead"></tr></thead>
+              <tbody id="dev-tbody"></tbody>
+            </table>
           </div>
-          <div class="tkt-sidebar-body" id="dev-sb-body"></div>
-          <div class="sidebar-actions" id="dev-sb-actions"></div>
+          <div class="tkt-sidebar" id="dev-sidebar">
+            <div class="tkt-sidebar-hdr">
+              <div style="font-size:14px;font-weight:700;color:var(--navy);" id="dev-sb-title">Gerät</div>
+              <button class="tkt-close" onclick="closeDevSidebar()">✕</button>
+            </div>
+            <div class="tkt-sidebar-body" id="dev-sb-body"></div>
+            <div class="sidebar-actions" id="dev-sb-actions"></div>
+          </div>
+        </div>
+      </div>
+      <!-- SP AzureGerte panel -->
+      <div id="dev-pane-sp" style="flex:1;overflow:hidden;display:none;flex-direction:column;">
+        <div class="tkt-main">
+          <div style="flex:1;overflow:auto;" id="dev-sp-table-wrap">
+            <div class="empty" id="dev-sp-empty">SP-Liste wird geladen…</div>
+            <table class="tkt-table" id="dev-sp-table" style="display:none;">
+              <thead><tr id="dev-sp-thead"></tr></thead>
+              <tbody id="dev-sp-tbody"></tbody>
+            </table>
+          </div>
+          <div class="tkt-sidebar" id="dev-sp-sidebar">
+            <div class="tkt-sidebar-hdr">
+              <div style="font-size:14px;font-weight:700;color:var(--navy);" id="dev-sp-sb-title">Eintrag</div>
+              <button class="tkt-close" onclick="$id('dev-sp-sidebar').classList.remove('open')">✕</button>
+            </div>
+            <div class="tkt-sidebar-body" id="dev-sp-sb-body"></div>
+            <div class="sidebar-actions" id="dev-sp-sb-actions"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1157,14 +1181,20 @@ async function refreshNewTickets() {
   const btn = $id('btn-refresh');
   if (btn) { btn.disabled=true; btn.textContent='⏳'; }
   try {
-    // Use max known item ID — SP item IDs are sequential integers
-    const maxId = allTickets.reduce((m,t)=>Math.max(m,parseInt(t.id)||0), 0);
-    dbg('Smart Refresh: maxId =', maxId);
+    // Find the most recent createdDateTime we know
+    const maxDate = allTickets.reduce((m,t)=>{
+      const d = new Date(t.createdDateTime||t.fields?.Created||0);
+      return d>m?d:m;
+    }, new Date(0));
+    // Add 1 second to avoid re-fetching the exact same item
+    const afterDate = new Date(maxDate.getTime()+1000).toISOString();
+    dbg('Smart Refresh: suche nach', afterDate);
 
-    // Fetch items with ID greater than our max — no $orderby needed
-    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$filter=id gt ${maxId}&$top=100`;
+    // $top without $orderby avoids List View Threshold; filter by Created >= afterDate
+    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$filter=fields/Created ge '${afterDate}'&$top=100`;
     const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
-    const freshNew = d.value||[];
+    const existingIds = new Set(allTickets.map(t=>t.id));
+    const freshNew = (d.value||[]).filter(t=>!existingIds.has(t.id));
     dbg('Smart Refresh: neue Items', freshNew.length);
 
     if (freshNew.length) {
@@ -1297,10 +1327,11 @@ function openTicketDetail(id) {
   $id('sb-title').textContent = `Ticket #${id}`;
 
   // Status quick-change
-  const colStatus = col(['Status'])||'Status';
-  const curStatus = f[colStatus]||f.Status||'Offen';
-  const statuses  = ['Offen','Neu','In Bearbeitung','Warten auf Rückmeldung','Erledigt','Abgebrochen'];
-  const stColors  = {Offen:'var(--blue)',Neu:'#6366f1','In Bearbeitung':'var(--yellow)','Warten auf Rückmeldung':'var(--orange)',Erledigt:'var(--green)',Abgebrochen:'#6b7280'};
+  const colStatus  = col(['Status'])||'Status';
+  const curStatus  = f[colStatus]||f.Status||'Offen';
+  const assignedCol= getCol('assigned');
+  const statuses   = ['Offen','Neu','In Bearbeitung','Warten auf Rückmeldung','Erledigt','Abgebrochen'];
+  const stColors   = {Offen:'var(--blue)',Neu:'#6366f1','In Bearbeitung':'var(--yellow)','Warten auf Rückmeldung':'var(--orange)',Erledigt:'var(--green)',Abgebrochen:'#6b7280'};
 
   let html = `<div class="section-title">Status</div>
     <div style="display:flex;align-items:center;gap:10px;">
@@ -2382,6 +2413,126 @@ function openDevDetail(deviceId) {
 
 function closeDevSidebar() { $id('dev-sidebar').classList.remove('open'); devEditingId=null; }
 
+// ── DEVICE TABS ──
+let _devTab = 'azure';
+let _devSpItems = [], _devSpCols = {}, _devSpSiteId = null, _devSpListId = null;
+
+function switchDevTab(tab) {
+  _devTab = tab;
+  const azBtn = $id('dev-tab-azure'), spBtn = $id('dev-tab-sp');
+  const azPane = $id('dev-pane-azure'), spPane = $id('dev-pane-sp');
+  if (!azBtn||!spBtn||!azPane||!spPane) return;
+
+  azBtn.style.color = tab==='azure' ? 'var(--navy)' : 'var(--text-dim)';
+  azBtn.style.borderBottom = tab==='azure' ? '3px solid var(--navy)' : '3px solid transparent';
+  azBtn.style.fontWeight = tab==='azure' ? '700' : '600';
+  spBtn.style.color = tab==='sp' ? 'var(--navy)' : 'var(--text-dim)';
+  spBtn.style.borderBottom = tab==='sp' ? '3px solid var(--navy)' : '3px solid transparent';
+  spBtn.style.fontWeight = tab==='sp' ? '700' : '600';
+
+  azPane.style.display = tab==='azure' ? 'flex' : 'none';
+  spPane.style.display = tab==='sp'    ? 'flex' : 'none';
+
+  if (tab==='sp' && !_devSpItems.length) loadDevSP();
+}
+
+async function loadDevSP() {
+  const empty = $id('dev-sp-empty');
+  const table = $id('dev-sp-table');
+  if (!empty||!table) return;
+  empty.style.display='block'; empty.textContent='Lade SP-Liste AzureGerte…'; empty.style.color='';
+  table.style.display='none';
+  try {
+    if (!_devSpSiteId) {
+      const site = await gGet('/sites/dihag.sharepoint.com:/sites/IT');
+      _devSpSiteId = site.id;
+    }
+    if (!_devSpListId) {
+      const lists = await gGet(`/sites/${_devSpSiteId}/lists?$select=id,displayName,name&$top=100`);
+      const lst = (lists.value||[]).find(l=>l.name==='AzureGerte'||l.displayName==='AzureGerte'||l.displayName==='Azure Geräte');
+      if (!lst) throw new Error('AzureGerte-Liste nicht gefunden. Verfügbar: '+(lists.value||[]).map(l=>l.displayName).join(', '));
+      _devSpListId = lst.id;
+      const cols = await gGet(`/sites/${_devSpSiteId}/lists/${_devSpListId}/columns?$top=200`);
+      (cols.value||[]).forEach(c=>{ if(!c.readOnly) _devSpCols[c.name]=c.displayName; });
+    }
+    _devSpItems = [];
+    let url = `/sites/${_devSpSiteId}/lists/${_devSpListId}/items?$expand=fields&$top=100`;
+    while (url) {
+      const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
+      _devSpItems = [..._devSpItems, ...(d.value||[])];
+      url = d['@odata.nextLink'] ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+    }
+    if (!_devSpItems.length) { empty.textContent='Keine Einträge'; return; }
+    renderDevSP(_devSpItems);
+  } catch(e) {
+    empty.textContent='⚠ '+e.message; empty.style.color='var(--red)';
+  }
+}
+
+function renderDevSP(list) {
+  const skip = new Set(['ContentType','_UIVersionString','Attachments','ID','AuthorLookupId','EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount','ComplianceAssetId']);
+  const colKeys = [];
+  const seen = new Set();
+  list.slice(0,5).forEach(it=>{
+    Object.keys(it.fields||{}).forEach(k=>{
+      if(!seen.has(k)&&!skip.has(k)&&!k.startsWith('_')&&!k.startsWith('@')){ seen.add(k); colKeys.push(k); }
+    });
+  });
+  const showCols = colKeys.slice(0,8);
+  const thead = $id('dev-sp-thead'), tbody = $id('dev-sp-tbody');
+  const empty = $id('dev-sp-empty'), table = $id('dev-sp-table');
+  if (!thead||!tbody) return;
+  thead.innerHTML = '<th>#</th>'+showCols.map(k=>`<th>${esc(_devSpCols[k]||k)}</th>`).join('');
+  tbody.innerHTML = list.map(it=>{
+    const f=it.fields||{};
+    return `<tr class="clickable" onclick="openDevSPDetail('${esc(it.id)}')">
+      <td style="font-weight:600;color:var(--navy);">${it.id}</td>
+      ${showCols.map(k=>{
+        let v=f[k];
+        if(typeof v==='object'&&v) v=personName(v);
+        else v=esc(String(v||'').substring(0,50));
+        return `<td style="font-size:11px;">${v}</td>`;
+      }).join('')}
+    </tr>`;
+  }).join('');
+  $id('dev-count').textContent = list.length+' SP-Einträge';
+  empty.style.display='none'; table.style.display='';
+}
+
+function openDevSPDetail(id) {
+  const it = _devSpItems.find(x=>x.id==id);
+  if (!it) return;
+  const f = it.fields||{};
+  const skip = new Set(['ContentType','_UIVersionString','Attachments','ID','AuthorLookupId','EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount','ComplianceAssetId']);
+  let html='';
+  Object.entries(f).forEach(([k,v])=>{
+    if(skip.has(k)||k.startsWith('_')||k.startsWith('@')||v===null||v===undefined||v==='') return;
+    const label=_devSpCols[k]||k;
+    const valStr=typeof v==='object'?(personName(v)):String(v);
+    html+=`<div class="field-row"><label>${esc(label)}</label><input data-spfk="${esc(k)}" value="${esc(valStr)}" style="font-size:12px;"/></div>`;
+  });
+  html+=`<div style="font-size:10px;color:var(--text-muted);margin-top:8px;">Erstellt: ${fmtFull(it.createdDateTime)}</div>`;
+  $id('dev-sp-sb-title').textContent='Eintrag #'+id;
+  $id('dev-sp-sb-body').innerHTML=html;
+  $id('dev-sp-sb-actions').innerHTML=`
+    <button class="btn btn-primary" onclick="saveDevSP('${id}')" style="flex:1;">✓ Speichern</button>
+    <button class="btn btn-ghost" onclick="$id('dev-sp-sidebar').classList.remove('open')">✕</button>`;
+  $id('dev-sp-sidebar').classList.add('open');
+}
+
+async function saveDevSP(id) {
+  const raw={};
+  $id('dev-sp-sb-body').querySelectorAll('[data-spfk]').forEach(el=>{ if(el.value) raw[el.dataset.spfk]=el.value; });
+  const fields=stripReadOnly(raw);
+  try {
+    await gPatch(`/sites/${_devSpSiteId}/lists/${_devSpListId}/items/${id}/fields`, fields);
+    const it=_devSpItems.find(x=>x.id==id);
+    if(it) Object.assign(it.fields||{}, fields);
+    toast('Gespeichert ✓','success');
+    renderDevSP(_devSpItems);
+  } catch(e){ toast('Fehler: '+e.message,'error'); }
+}
+
 // ════════════════════════════════════════════════════════════════
 // PERMISSIONS SYSTEM (Tree-based, 4 Stufen)
 // ════════════════════════════════════════════════════════════════
@@ -2448,24 +2599,28 @@ document.addEventListener('click', e => {
 });
 
 async function spGet(url) {
-  // Derive token scope from URL
-  const gettok = async () => {
-    try { return await getSpTokenForSite(url); } catch { return getToken(); }
-  };
-  const tok = await gettok();
-  const r = await fetch(url, {headers:{Authorization:'Bearer '+tok, Accept:'application/json;odata=verbose'}});
-  if (r.ok) return r.json();
-  // On 401, force a fresh token with popup
-  if (r.status === 401) {
-    dbg('SP 401 — versuche neuen Token per Popup…');
-    const tok2 = await msalApp.acquireTokenPopup({scopes:['https://dihag.sharepoint.com/Sites.ReadWrite.All'], account}).then(r=>r.accessToken).catch(()=>null);
-    if (tok2) {
-      const r2 = await fetch(url, {headers:{Authorization:'Bearer '+tok2, Accept:'application/json;odata=verbose'}});
-      if (r2.ok) return r2.json();
-      throw new Error(`SP ${r2.status}: ${await r2.text().catch(()=>'')}`);
-    }
+  // Try multiple token scopes — SP REST RoleAssignments needs AllSites.FullControl
+  const origin = url.match(/^(https:\/\/[^\/]+)/)?.[1] || 'https://dihag.sharepoint.com';
+  const scopesToTry = [
+    `${origin}/AllSites.FullControl`,
+    `${origin}/AllSites.Manage`,
+    `${origin}/Sites.ReadWrite.All`,
+    `${origin}/AllSites.Read`
+  ];
+
+  for (const scope of scopesToTry) {
+    let tok;
+    try { tok = (await msalApp.acquireTokenSilent({scopes:[scope], account})).accessToken; }
+    catch { try { tok = (await msalApp.acquireTokenPopup({scopes:[scope], account})).accessToken; } catch { continue; } }
+    const r = await fetch(url, {headers:{Authorization:'Bearer '+tok, Accept:'application/json;odata=verbose'}});
+    if (r.ok) return r.json();
+    const status = r.status;
+    const body = await r.text().catch(()=>'');
+    dbg(`spGet ${scope.split('/').pop()} → ${status}`);
+    if (status === 403 || status === 401) continue; // try next scope
+    throw new Error(`SP ${status}: ${body}`);
   }
-  throw new Error(`SP ${r.status}: ${await r.text().catch(()=>'')}`);
+  throw new Error('SP: Kein Token-Scope hatte Zugriff auf diese Ressource (403/401 bei allen Versuchen)');
 }
 
 function roleIcon(role) {
@@ -2553,7 +2708,7 @@ function renderMembersTree(roleAssignments) {
     </div>`;
   }).filter(Boolean).join('');
 
-  return sharingHtml + mainHtml;
+  return mainHtml + sharingHtml;
 }
 
 function dToggleGroup(id) {
