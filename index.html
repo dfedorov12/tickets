@@ -172,7 +172,16 @@ header{
 .checkbox-row input[type=checkbox]{width:16px;height:16px;cursor:pointer;}
 .checkbox-row label{font-size:13px;cursor:pointer;}
 
-/* SPINNER */
+/* TICKET TABS */
+#ticket-tabs{display:none;height:36px;background:var(--navy2);border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;overflow-x:auto;overflow-y:hidden;white-space:nowrap;scrollbar-width:thin;}
+#ticket-tabs::-webkit-scrollbar{height:3px;}
+#ticket-tabs::-webkit-scrollbar-thumb{background:rgba(255,255,255,.2);}
+.tkt-tab{display:inline-flex;align-items:center;gap:6px;padding:0 14px;height:36px;font-size:11px;font-weight:600;color:rgba(255,255,255,.55);cursor:pointer;border-right:1px solid rgba(255,255,255,.08);white-space:nowrap;transition:all .12s;max-width:200px;}
+.tkt-tab:hover{background:rgba(255,255,255,.1);color:#fff;}
+.tkt-tab.active{background:rgba(255,255,255,.15);color:#fff;border-bottom:2px solid var(--red);}
+.tkt-tab-close{width:14px;height:14px;display:flex;align-items:center;justify-content:center;border-radius:3px;font-size:11px;opacity:.5;flex-shrink:0;}
+.tkt-tab-close:hover{background:rgba(255,255,255,.25);opacity:1;}
+.tkt-tab-label{overflow:hidden;text-overflow:ellipsis;max-width:150px;}
 .spinner{width:32px;height:32px;border:3px solid var(--border);
   border-top-color:var(--navy);border-radius:50%;animation:spin .8s linear infinite;margin:auto;}
 .empty{text-align:center;padding:48px;color:var(--text-dim);font-size:13px;}
@@ -328,12 +337,13 @@ header{
     </nav>
     <div class="hdr-right">
       <button class="hdr-btn primary" id="btn-new" onclick="openNewTicket()">＋ Neues Ticket</button>
-      <button class="hdr-btn" id="btn-refresh" onclick="streamTickets()">🔄</button>
+      <button class="hdr-btn" id="btn-refresh" onclick="refreshNewTickets()" title="Nur neue Tickets laden">🔄</button>
       <div class="hdr-divider"></div>
       <div class="hdr-av" id="hdr-av">?</div>
     </div>
   </header>
-
+  <!-- IN-APP TICKET TABS -->
+  <div id="ticket-tabs" style="display:flex;"></div>
   <div id="content">
     <!-- TICKETS PANEL -->
     <div class="panel active" id="panel-tickets">
@@ -475,6 +485,11 @@ header{
         <div style="font-size:12px;color:var(--text-dim);margin-top:3px;">Formulare & automatisierte Prozesse</div>
       </div>
       <div class="auto-grid" id="auto-grid"></div>
+    </div>
+
+    <!-- TICKET DETAIL PANEL (in-app tabs) -->
+    <div class="panel" id="panel-ticket-detail" style="overflow:auto;flex-direction:column;">
+      <div id="tkt-detail-content" style="flex:1;overflow:auto;padding:24px;max-width:960px;margin:0 auto;width:100%;"></div>
     </div>
   </div>
 </div>
@@ -807,13 +822,13 @@ function clearDebug() {
 // PANEL SWITCHING
 // ════════════════════════════════════════════════════════════════
 function showPanel(id) {
-  ['tickets','reports','devices','dms','perms','auto'].forEach(p => {
+  ['tickets','reports','devices','dms','perms','auto','ticket-detail'].forEach(p => {
     const panel = $id('panel-'+p);
-    const tab = $id('tab-'+p);
+    const tab   = $id('tab-'+p);
     if(panel) panel.classList.toggle('active', p===id);
-    if(tab) tab.classList.toggle('on', p===id);
+    if(tab)   tab.classList.toggle('on', p===id);
   });
-  $id('btn-new').style.display = id==='tickets' ? '' : 'none';
+  $id('btn-new').style.display     = (id==='tickets'||id==='ticket-detail') ? '' : 'none';
   $id('btn-refresh').style.display = id==='tickets' ? '' : 'none';
   if (id==='reports' && allTickets.length) buildReports();
   if (id==='devices' && !allDevices.length) loadDevices();
@@ -989,7 +1004,7 @@ function renderTickets(list) {
       ? `<span class="attach-count">📎 ${attCount}</span>`
       : '<span style="color:var(--text-muted);font-size:10px;">—</span>';
 
-    return `<tr class="clickable" onclick="openTicketDetail('${it.id}')">
+    return `<tr class="clickable" onclick="openTicketTab('${it.id}')" ondblclick="openTicketDetail('${it.id}')">
       <td style="font-weight:600;color:var(--navy);">#${it.id}</td>
       <td>${esc(f[cTitle] || f.Title || '')}</td>
       <td style="color:var(--text-dim);">${esc(assigned)}</td>
@@ -1106,6 +1121,68 @@ async function streamTickets() {
       $id('tkt-empty').textContent='⚠ '+e.message;
       $id('tkt-empty').style.color='var(--red)';
     }
+  }
+}
+
+async function refreshNewTickets() {
+  // If no tickets loaded yet, do full load
+  if (!allTickets.length || !ticketSiteId || !ticketListId) { streamTickets(); return; }
+  const btn = $id('btn-refresh');
+  if (btn) { btn.disabled=true; btn.textContent='⏳'; }
+  try {
+    // Find newest ticket date
+    const newest = allTickets.reduce((max,t)=>{
+      const d=new Date(t.createdDateTime||t.fields?.Created||0);
+      return d>max?d:max;
+    }, new Date(0));
+    // Also check for recently MODIFIED tickets (last 1 hour)
+    const modifiedSince = new Date(Date.now()-3600000).toISOString();
+    const newestIso = newest.toISOString();
+    dbg('Smart Refresh: suche Tickets neuer als', newestIso);
+
+    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$orderby=createdDateTime desc&$top=50`;
+    const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
+    const incoming = d.value||[];
+
+    // Detect new (not yet in cache)
+    const existingIds = new Set(allTickets.map(t=>t.id));
+    const freshNew = incoming.filter(t=>!existingIds.has(t.id));
+
+    // Detect modified (same ID but newer etag/modified date)
+    let updated = 0;
+    incoming.forEach(t=>{
+      if(existingIds.has(t.id)){
+        const idx = allTickets.findIndex(x=>x.id===t.id);
+        if(idx>=0){
+          const oldMod = allTickets[idx].fields?.Modified || allTickets[idx].lastModifiedDateTime || '';
+          const newMod = t.fields?.Modified || t.lastModifiedDateTime || '';
+          if(newMod && newMod !== oldMod){ allTickets[idx]=t; updated++; }
+        }
+      }
+    });
+
+    if (freshNew.length) {
+      allTickets = [...freshNew, ...allTickets];
+      sortByCreatedDesc(allTickets);
+      buildFilterOptions(allTickets);
+    }
+
+    if (freshNew.length || updated) {
+      const list = filterActive() ? applyFilters(allTickets) : allTickets.slice(0,displayedCount);
+      renderTickets(list);
+      renderLoadMore();
+      $id('tkt-count').textContent = allTickets.length+' Tickets';
+      saveTicketCache();
+      const msg = [freshNew.length?freshNew.length+' neu':'', updated?updated+' aktualisiert':''].filter(Boolean).join(', ');
+      toast(`✓ ${msg}`, 'success');
+    } else {
+      toast('Keine neuen Tickets', 'info');
+    }
+  } catch(e) {
+    dbg('Smart Refresh Fehler', e.message);
+    toast('Refresh: '+e.message, 'error');
+  } finally {
+    if(btn){ btn.disabled=false; btn.textContent='🔄'; }
   }
 }
 
@@ -1332,9 +1409,10 @@ function openTicketDetail(id) {
   $id('sb-body').innerHTML = html;
   $id('sb-actions').innerHTML = `
     <button class="btn btn-primary" onclick="saveSidebar('${id}')" style="flex:1;">✓ Speichern</button>
-    <button class="btn btn-ghost" onclick="openTicketNewTab('${id}')" title="In neuem Browser-Tab öffnen">🔗 Tab</button>
-    <button class="btn btn-ghost" onclick="openTicketFullscreen('${id}')">⛶ Vollbild</button>
-    <button class="btn btn-ghost"   onclick="closeSidebar()">Schließen</button>
+    <button class="btn btn-ghost" onclick="openTicketTab('${id}')" title="In App-Tab öffnen">⊞ Tab</button>
+    <button class="btn btn-ghost" onclick="openTicketNewTab('${id}')" title="In Browser-Tab öffnen">🔗</button>
+    <button class="btn btn-ghost" onclick="openTicketFullscreen('${id}')">⛶</button>
+    <button class="btn btn-ghost"   onclick="closeSidebar()">✕</button>
     <button class="btn btn-danger"  onclick="confirmDeleteTicket('${id}')">🗑</button>`;
 
   sidebar.classList.add('open');
@@ -1377,6 +1455,181 @@ async function fetchTicketAttachments(id) {
 }
 
 function closeSidebar() { $id('tkt-sidebar').classList.remove('open'); editingId=null; }
+
+// ── IN-APP TICKET TABS ──
+let _openTabs = {};
+let _activeTabId = null;
+
+function openTicketTab(id) {
+  const it = allTickets.find(t=>t.id==id);
+  if (!it) { toast('Ticket nicht im Cache — bitte Refresh','error'); return; }
+  const f = it.fields||{};
+  const cTitle = getCol('title')||'Title';
+  const title  = String(f[cTitle]||f.Title||'Ticket #'+id).substring(0,30);
+  _openTabs[id] = {id, title};
+  _activeTabId  = id;
+  renderTabBar();
+  showTicketDetailPanel(id);
+  showPanel('ticket-detail');
+}
+
+function renderTabBar() {
+  const bar = $id('ticket-tabs');
+  if (!bar) return;
+  const ids = Object.keys(_openTabs);
+  bar.style.display = ids.length ? 'flex' : 'none';
+  bar.innerHTML = ids.map(id => {
+    const t = _openTabs[id];
+    const active = _activeTabId==id ? ' active' : '';
+    return '<div class="tkt-tab'+active+'" onclick="switchTab(\'' + id + '\')">'
+      + '<span class="tkt-tab-label">#' + id + ' ' + esc(t.title) + '</span>'
+      + '<span class="tkt-tab-close" onclick="event.stopPropagation();closeTab(\'' + id + '\')">✕</span>'
+      + '</div>';
+  }).join('');
+}
+
+function switchTab(id) {
+  _activeTabId = id;
+  renderTabBar();
+  showTicketDetailPanel(id);
+  showPanel('ticket-detail');
+}
+
+function closeTab(id) {
+  delete _openTabs[id];
+  const remaining = Object.keys(_openTabs);
+  if (_activeTabId == id) {
+    if (remaining.length) { _activeTabId=remaining[remaining.length-1]; showTicketDetailPanel(_activeTabId); showPanel('ticket-detail'); }
+    else { _activeTabId=null; showPanel('tickets'); }
+  }
+  renderTabBar();
+}
+
+function showTicketDetailPanel(id) {
+  const it = allTickets.find(t=>t.id==id);
+  if (!it) return;
+  const f = it.fields||{};
+  const colStatus = col(['Status'])||'Status';
+  const curStatus = f[colStatus]||'Offen';
+  const cTitle    = getCol('title')||'Title';
+  const cDesc     = getCol('desc');
+  const cAssign   = getCol('assigned');
+  const stColors  = {Offen:'var(--blue)',Neu:'#6366f1','In Bearbeitung':'var(--yellow)','Warten auf Rückmeldung':'var(--orange)',Erledigt:'var(--green)',Abgebrochen:'#6b7280'};
+  const statuses  = ['Offen','Neu','In Bearbeitung','Warten auf Rückmeldung','Erledigt','Abgebrochen'];
+  const skipKeys  = new Set(['_UIVersionString','ContentType','Attachments','ID','AuthorLookupId','EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount','ComplianceAssetId','@odata.etag']);
+  const stColor   = stColors[curStatus]||'#666';
+  const titleText = esc(f[cTitle]||f.Title||'');
+
+  let fieldsHtml = '';
+  Object.entries(f).forEach(([k,v])=>{
+    if(skipKeys.has(k)||k.startsWith('_')||k.startsWith('@odata')||k===colStatus||v===null||v===undefined||v==='') return;
+    const label    = ticketCols[k]||k;
+    const isAssign = k===cAssign;
+    const isDesc   = k===cDesc||isRichText(v);
+
+    if(isDesc){
+      fieldsHtml+=`<div class="field-row" style="grid-column:1/-1"><label>${esc(label)}</label>
+        <div class="desc-box" style="padding:10px 12px;border:1.5px solid var(--border2);border-radius:6px;font-size:13px;line-height:1.7;background:var(--bg);">${cleanHtml(v)}</div>
+        <textarea data-fk="${esc(k)}" style="display:none;font-size:12px;margin-top:6px;" rows="5">${esc(String(v||''))}</textarea>
+        <button class="desc-edit-btn" style="font-size:10px;color:var(--blue);background:none;border:none;cursor:pointer;margin-top:4px;">✏️ Bearbeiten</button></div>`;
+    } else if(isAssign){
+      const fid='dtppl_'+k.replace(/[^a-z0-9]/gi,'_');
+      fieldsHtml+=`<div class="field-row"><label>${esc(label)}</label>
+        <div style="position:relative;">
+          <input id="${fid}" data-fk-person="${esc(k)}" value="${esc(personName(v))}" style="width:100%;font-size:12px;" placeholder="Name suchen..." autocomplete="off"/>
+          <div id="${fid}_dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border2);border-top:none;border-radius:0 0 7px 7px;z-index:200;max-height:180px;overflow:auto;box-shadow:var(--shadow);"></div>
+          <input type="hidden" id="${fid}_id" data-fk="${esc(k)}LookupId"/>
+        </div></div>`;
+    } else if(ticketChoices[k]){
+      const curVal=String(v||'');
+      fieldsHtml+=`<div class="field-row"><label>${esc(label)}</label>
+        <select data-fk="${esc(k)}" style="padding:7px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;font-size:12px;">
+          ${ticketChoices[k].map(c=>`<option value="${esc(c)}"${c===curVal?' selected':''}>${esc(c)}</option>`).join('')}
+        </select></div>`;
+    } else if(typeof v==='string'&&/^\d{4}-\d{2}-\d{2}T/.test(v)){
+      fieldsHtml+=`<div class="field-row"><label>${esc(label)}</label><input value="${fmtFull(v)}" style="font-size:12px;background:var(--bg);" readonly/></div>`;
+    } else if(Array.isArray(v)||(typeof v==='string'&&v.startsWith('['))){
+      fieldsHtml+=`<div class="field-row"><label>${esc(label)}</label><input value="${esc(personName(v))}" style="font-size:12px;background:var(--bg);" readonly/></div>`;
+    } else {
+      const valStr = typeof v==='object'?(v?.LookupValue||v?.displayName||v?.Title||v?.Email||''):String(v);
+      fieldsHtml+=`<div class="field-row"><label>${esc(label)}</label><input data-fk="${esc(k)}" value="${esc(valStr)}" style="font-size:12px;"/></div>`;
+    }
+  });
+
+  const stOpts = statuses.map(s=>`<option value="${esc(s)}"${s===curStatus?' selected':''}>${esc(s)}</option>`).join('');
+
+  $id('tkt-detail-content').innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
+      <div style="font-size:20px;font-weight:700;color:var(--navy);flex:1;">Ticket #${id} — ${titleText}</div>
+      <button class="btn btn-primary" onclick="saveDetailTab('${id}')">✓ Speichern</button>
+      <button class="btn btn-ghost" onclick="openTicketNewTab('${id}')" title="Als Browser-Tab öffnen">🔗 Ext.</button>
+      <button class="btn btn-danger" onclick="confirmDeleteTicket('${id}')">🗑</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;">
+      <span class="st-badge" id="dt-status-badge-${id}" style="font-size:13px;padding:5px 16px;background:${stColor}22;color:${stColor};">${esc(curStatus)}</span>
+      <select onchange="changeStatus('${id}',this.value)" style="padding:6px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer;">
+        ${stOpts}
+      </select>
+      <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">Erstellt: ${fmtFull(it.createdDateTime)}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;" id="dt-fields-${id}">${fieldsHtml}</div>
+    <div class="section-title" style="margin-top:20px;">Anhänge</div>
+    <div id="dt-atts-${id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"><span style="font-size:11px;color:var(--text-muted);">Lade...</span></div>
+    <label class="attach-pill" style="cursor:pointer;">＋ Datei(en) anhängen<input type="file" multiple style="display:none;" onchange="uploadAttachments(this.files,'${id}')"/></label>`;
+
+  // Attach desc-edit buttons
+  $id('tkt-detail-content').querySelectorAll('.desc-edit-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const ta = btn.previousElementSibling;
+      const dv = ta.previousElementSibling;
+      ta.style.display=''; dv.style.display='none'; btn.style.display='none';
+    });
+  });
+  // Attach person picker
+  $id('tkt-detail-content').querySelectorAll('[data-fk-person]').forEach(inp=>{
+    const ddId = inp.id+'_dd';
+    inp.addEventListener('input', ()=>searchUsers(inp, ddId));
+  });
+
+  fetchTicketAttachmentsTo(id, 'dt-atts-'+id);
+}
+async function fetchTicketAttachmentsTo(id, containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  try {
+    const spTok = await getSpToken();
+    const r = await fetch('https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid\''+ticketListId+'\' )/items('+id+')/AttachmentFiles',
+      {headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=verbose'}});
+    const j = await r.json();
+    const files = j?.d?.results||j?.value||[];
+    container.innerHTML = '';
+    if(!files.length){ container.innerHTML='<span style="font-size:11px;color:var(--text-muted);">Keine Anhänge</span>'; return; }
+    files.forEach(a=>{
+      const url=a.ServerRelativeUrl?'https://dihag.sharepoint.com'+a.ServerRelativeUrl:(a.AbsoluteUri||'#');
+      const link=document.createElement('a'); link.href=url; link.target='_blank'; link.className='attach-pill';
+      link.textContent='📎 '+(a.FileName||'Anhang'); container.appendChild(link);
+    });
+  } catch(e){ if(container) container.innerHTML='<span style="font-size:11px;color:var(--red);">'+esc(e.message)+'</span>'; }
+}
+
+async function saveDetailTab(id) {
+  const container = $id('dt-fields-'+id);
+  if(!container||!ticketSiteId||!ticketListId) return;
+  const raw={};
+  container.querySelectorAll('[data-fk]').forEach(el=>{ if(el.value!==undefined&&el.value!=='') raw[el.dataset.fk]=el.value; });
+  const fields=stripReadOnly(raw);
+  try {
+    await gPatch('/sites/'+ticketSiteId+'/lists/'+ticketListId+'/items/'+id+'/fields', fields);
+    const it=allTickets.find(t=>t.id==id);
+    if(it) Object.assign(it.fields||{}, fields);
+    const cTitle=getCol('title')||'Title';
+    if(_openTabs[id]&&fields[cTitle]){ _openTabs[id].title=String(fields[cTitle]).substring(0,30); renderTabBar(); }
+    toast('Gespeichert ✓','success');
+    const list=filterActive()?applyFilters(allTickets):allTickets.slice(0,displayedCount);
+    renderTickets(list);
+    saveTicketCache();
+  } catch(e){ toast('Fehler: '+e.message,'error'); }
+}
 
 function openTicketNewTab(id) {
   const it = allTickets.find(t=>t.id==id);
@@ -1640,6 +1893,8 @@ async function changeStatus(id, newStatus) {
     // Update badge live
     const badge = document.getElementById('sb-status-badge-'+id);
     if(badge){ badge.textContent=newStatus; badge.style.background=(stColors[newStatus]||'#666')+'22'; badge.style.color=stColors[newStatus]||'#666'; }
+    const dtBadge = document.getElementById('dt-status-badge-'+id);
+    if(dtBadge){ dtBadge.textContent=newStatus; dtBadge.style.background=(stColors[newStatus]||'#666')+'22'; dtBadge.style.color=stColors[newStatus]||'#666'; }
     toast(`Status → ${newStatus}`,'success');
     const list = filterActive() ? applyFilters(allTickets) : allTickets.slice(0,displayedCount);
     renderTickets(list);
@@ -1923,30 +2178,103 @@ async function loadDevices(force) {
   allDevices = [];
   $id('dev-empty').style.display='block';
   $id('dev-empty').textContent='Lade Azure-Geräte…';
+  $id('dev-empty').style.color='';
   $id('dev-table').style.display='none';
+
+  // Try 1: Intune managed devices (requires DeviceManagementManagedDevices.Read.All)
   try {
-    dbg('Azure-Geräte: Lade via Graph /devices…');
-    let url = '/devices?$select=displayName,operatingSystem,operatingSystemVersion,approximateLastSignInDateTime,deviceId,isCompliant,isManaged,registrationDateTime,manufacturer,model,trustType,profileType&$top=100';
+    dbg('Azure-Geräte: Versuch 1 — Intune /deviceManagement/managedDevices');
+    let url = '/deviceManagement/managedDevices?$select=deviceName,operatingSystem,osVersion,lastSyncDateTime,complianceState,managementAgent,enrolledDateTime,manufacturer,model,userPrincipalName,serialNumber,totalStorageSpaceInBytes,freeStorageSpaceInBytes&$top=100';
     while (url) {
       const d = await gGet(url);
       allDevices = [...allDevices, ...(d.value||[])];
       url = d['@odata.nextLink'] ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
     }
-    dbg('Azure-Geräte geladen', {anzahl: allDevices.length});
-    if (!allDevices.length) {
-      $id('dev-empty').textContent = 'Keine Azure-Geräte gefunden. (Scope Device.Read.All oder Directory.Read.All ggf. erforderlich)';
-      return;
+    if (allDevices.length) { dbg('Intune Geräte geladen', {anzahl: allDevices.length}); buildDevTableIntune(); return; }
+  } catch(e1) { dbg('Intune fehlgeschlagen', e1.message); }
+
+  // Try 2: Azure AD /devices (requires Device.Read.All)
+  try {
+    dbg('Azure-Geräte: Versuch 2 — /devices');
+    let url = '/devices?$select=displayName,operatingSystem,operatingSystemVersion,approximateLastSignInDateTime,deviceId,isCompliant,isManaged,registrationDateTime,manufacturer,model,trustType&$top=100';
+    while (url) {
+      const d = await gGet(url);
+      allDevices = [...allDevices, ...(d.value||[])];
+      url = d['@odata.nextLink'] ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
     }
-    buildDevTable();
-  } catch(e) {
-    dbg('Azure-Geräte FEHLER', e.message);
-    // Friendly hint if permission missing
-    const hint = /Forbidden|403|Authorization/.test(e.message)
-      ? ' — Benötigt Scope: Device.Read.All (Admin-Consent erforderlich)'
-      : '';
-    $id('dev-empty').textContent = '⚠ ' + e.message + hint;
-    $id('dev-empty').style.color='var(--red)';
-  }
+    if (allDevices.length) { dbg('Azure AD Devices geladen', {anzahl: allDevices.length}); buildDevTable(); return; }
+  } catch(e2) { dbg('/devices fehlgeschlagen', e2.message); }
+
+  // Fallback: show config to enter SP list manually
+  dbg('Beide APIs nicht verfügbar — zeige SP-Konfiguration');
+  $id('dev-empty').innerHTML = `
+    <div style="max-width:500px;margin:0 auto;text-align:left;">
+      <div style="font-size:14px;font-weight:700;color:var(--navy);margin-bottom:8px;">⚠ Azure AD Berechtigungen fehlen</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:16px;">
+        Die Scopes <code>DeviceManagementManagedDevices.Read.All</code> und <code>Device.Read.All</code> sind nicht erteilt.<br>
+        Alternativ: Geräteliste aus SharePoint laden.
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        <input id="dev-sp-site" placeholder="Site z.B. dihag.sharepoint.com:/sites/IT" style="flex:1;padding:8px 12px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;font-size:12px;" value="dihag.sharepoint.com:/sites/IT"/>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <input id="dev-sp-list" placeholder="Listenname z.B. IT Onboarding" style="flex:1;padding:8px 12px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;font-size:12px;" value="IT Onboarding"/>
+        <button onclick="loadDevicesFromSP()" style="padding:8px 18px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;">Laden</button>
+      </div>
+    </div>`;
+  $id('dev-empty').style.color='';
+}
+
+async function loadDevicesFromSP() {
+  const site = ($id('dev-sp-site')?.value||'').trim();
+  const listName = ($id('dev-sp-list')?.value||'').trim();
+  if (!site||!listName) { toast('Bitte Site und Liste eingeben','error'); return; }
+  $id('dev-empty').textContent='Lade aus SharePoint…';
+  try {
+    const siteData = await gGet(`/sites/${site}`);
+    const siteId = siteData.id;
+    const lists = await gGet(`/sites/${siteId}/lists?$select=id,displayName,name&$top=100`);
+    const lst = (lists.value||[]).find(l=>l.displayName===listName||l.name===listName);
+    if (!lst) throw new Error('Liste "'+listName+'" nicht gefunden in: '+(lists.value||[]).map(l=>l.displayName).join(', '));
+    let url = `/sites/${siteId}/lists/${lst.id}/items?$expand=fields&$top=100`;
+    while (url) {
+      const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
+      allDevices = [...allDevices, ...(d.value||[])];
+      url = d['@odata.nextLink'] ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+    }
+    if (!allDevices.length) { $id('dev-empty').textContent='Keine Einträge gefunden'; return; }
+    buildDevTableSP(); // SP list format
+  } catch(e) { $id('dev-empty').textContent='⚠ '+e.message; $id('dev-empty').style.color='var(--red)'; }
+}
+
+function buildDevTableIntune() {
+  const cols = [
+    {key:'deviceName',label:'Name'},{key:'operatingSystem',label:'OS'},{key:'osVersion',label:'Version'},
+    {key:'manufacturer',label:'Hersteller'},{key:'model',label:'Modell'},
+    {key:'complianceState',label:'Konformität'},{key:'managementAgent',label:'Verwaltung'},
+    {key:'userPrincipalName',label:'User'},{key:'lastSyncDateTime',label:'Letzter Sync'},
+  ];
+  $id('dev-thead').innerHTML = '<th>#</th>' + cols.map(c=>`<th>${esc(c.label)}</th>`).join('');
+  renderDevices(allDevices, cols);
+  $id('dev-count').textContent = allDevices.length + ' Intune-Geräte';
+}
+
+function buildDevTableSP() {
+  const skip = new Set(['ContentType','_UIVersionString','Attachments','ID','AuthorLookupId','EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount','ComplianceAssetId']);
+  const colKeys = [];
+  const seen = new Set();
+  allDevices.slice(0,5).forEach(it => {
+    Object.keys(it.fields||{}).forEach(k=>{
+      if(!seen.has(k)&&!skip.has(k)&&!k.startsWith('_')&&!k.startsWith('@odata')){ seen.add(k); colKeys.push(k); }
+    });
+  });
+  const spCols = colKeys.slice(0,8).map(k=>({key:'__sp_'+k, label:k}));
+  $id('dev-thead').innerHTML = '<th>#</th>' + spCols.map(c=>`<th>${esc(c.label)}</th>`).join('');
+  // Remap for render
+  const mapped = allDevices.map(it=>{ const o={...it}; Object.entries(it.fields||{}).forEach(([k,v])=>{ o['__sp_'+k]=typeof v==='object'?personName(v):String(v||''); }); return o; });
+  allDevices = mapped;
+  renderDevices(allDevices, spCols);
+  $id('dev-count').textContent = allDevices.length + ' SP-Einträge';
 }
 
 function buildDevTable() {
@@ -2480,11 +2808,21 @@ async function startPermScan() {
       return treeNode('🌐', esc(s.Title), uTag, `<div class="tree-loading" style="font-size:10px;">${esc(s.Url)}</div>`);
     }).join('');
 
+    // Site-level sharing links (on demand)
+    const siteSLId = 'site_sl_'+Math.random().toString(36).slice(2);
+    const siteSLBtn = `<div style="margin:8px 0 4px;">
+      <button onclick="loadSiteSharingLinks('${esc(permSiteId)}','${siteSLId}')" id="${siteSLId}_btn"
+        style="font-size:11px;padding:3px 10px;background:none;border:1.5px solid var(--border2);border-radius:5px;cursor:pointer;color:var(--text-dim);">
+        🔗 Site Sharing Links anzeigen
+      </button>
+      <div id="${siteSLId}" style="display:none;margin-top:6px;"></div>
+    </div>`;
+
     // Assemble tree
     const tree = `<div class="tree">
       ${treeNode('🌐', `<strong>${esc(siteName)}</strong> <span style="font-size:10px;color:var(--text-muted);">(Site)</span>`,
         '<span class="tree-badge" style="background:var(--navy);color:#fff;">Stufe 1</span>',
-        siteMembers +
+        siteMembers + siteSLBtn +
         treeNode('📚', `Bibliotheken (${libs.length})`, '<span class="tree-badge" style="background:var(--navy2);color:#fff;">Stufe 2</span>', libNodes, 'tree_libs') +
         (otherLists.length ? treeNode('📋', `Listen (${otherLists.length})`, '<span class="tree-badge" style="background:var(--navy2);color:#fff;">Stufe 2</span>', listNodes, 'tree_lists') : '') +
         (subsites.length ? treeNode('🌐', `Unterseiten (${subsites.length})`, '<span class="tree-badge" style="background:var(--navy2);color:#fff;">Stufe 2</span>', subNodes, 'tree_subs') : ''),
@@ -2635,6 +2973,44 @@ async function getItemPermsHtml(webUrl, driveId, itemId) {
     }
     return `<div class="perm-members" style="padding:2px 0 2px 6px;">${renderMembersTree(results)}</div>`;
   } catch { return ''; }
+}
+
+// Site-level sharing links
+async function loadSiteSharingLinks(siteId, containerId) {
+  const btn = $id(containerId+'_btn');
+  const box = $id(containerId);
+  if(!btn||!box) return;
+  btn.disabled=true; btn.textContent='⏳ Lade…';
+  try {
+    // Get sharing links via site drives
+    const drives = await gGet('/sites/'+siteId+'/drives?$top=20');
+    let allLinks = [];
+    for (const drv of (drives.value||[]).slice(0,3)) {
+      try {
+        const r = await gGet('/drives/'+drv.id+'/root/permissions?$top=50');
+        const links = (r.value||[]).filter(p=>p.link).map(p=>({...p, _libName:drv.name}));
+        allLinks = [...allLinks, ...links];
+      } catch{}
+    }
+    if(!allLinks.length){
+      box.innerHTML='<div style="font-size:11px;color:var(--text-muted);">Keine aktiven Sharing Links</div>';
+    } else {
+      box.innerHTML='<div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px;">🔗 '+allLinks.length+' Sharing Link(s) (Site):</div>'
+        +allLinks.map(l=>'<div style="padding:5px 8px;background:var(--bg);border-radius:6px;margin-bottom:4px;font-size:11px;">'
+          +'<span style="font-size:9px;color:var(--text-muted);">'+esc(l._libName||'')+'</span> '
+          +'<span style="font-weight:600;">'+esc(l.link?.type||'Link')+'</span> '
+          +'<span style="color:var(--text-muted);">'+esc(l.link?.scope||'')+'</span>'
+          +(l.link?.webUrl?'<a href="'+esc(l.link.webUrl)+'" target="_blank" style="margin-left:8px;color:var(--blue);">↗</a>':'')
+          +'</div>').join('');
+    }
+    box.style.display='block';
+    btn.disabled=false;
+    btn.textContent='🔗 Site Sharing Links verbergen';
+    btn.onclick=()=>{ box.style.display=box.style.display==='none'?'block':'none'; btn.textContent=box.style.display==='none'?'🔗 Site Sharing Links anzeigen':'🔗 Site Sharing Links verbergen'; };
+  } catch(e){
+    box.innerHTML='<div style="font-size:11px;color:var(--red);">⚠ '+esc(e.message)+'</div>';
+    box.style.display='block'; btn.disabled=false; btn.textContent='🔗 Site Sharing Links anzeigen';
+  }
 }
 
 // Sharing links: load on demand
