@@ -444,7 +444,7 @@ header{
           <div style="padding:5px 12px;background:var(--navy);color:#fff;font-size:11px;font-weight:700;flex-shrink:0;display:flex;align-items:center;gap:6px;">
             💻 Azure AD Geräte
           </div>
-          <div class="tkt-main" style="flex:1;overflow:hidden;">
+          <div style="flex:1;overflow:hidden;position:relative;display:flex;">
             <div style="flex:1;overflow:auto;" id="dev-table-wrap">
               <div class="empty" id="dev-empty">Lade Geräte…</div>
               <table class="tkt-table" id="dev-table" style="display:none;">
@@ -452,7 +452,7 @@ header{
                 <tbody id="dev-tbody"></tbody>
               </table>
             </div>
-            <div class="tkt-sidebar" id="dev-sidebar">
+            <div id="dev-sidebar" style="display:none;position:absolute;top:0;right:0;bottom:0;width:360px;background:#fff;border-left:1px solid var(--border);flex-direction:column;z-index:10;overflow:hidden;box-shadow:-4px 0 12px rgba(10,31,60,.1);">
               <div class="tkt-sidebar-hdr">
                 <div style="font-size:14px;font-weight:700;color:var(--navy);" id="dev-sb-title">Gerät</div>
                 <button class="tkt-close" onclick="closeDevSidebar()">✕</button>
@@ -468,7 +468,7 @@ header{
             📋 SP AzureGerte-Liste
             <a href="https://dihag.sharepoint.com/sites/IT/Lists/AzureGerte/AllItems.aspx" target="_blank" style="font-size:10px;color:rgba(255,255,255,.7);font-weight:400;margin-left:auto;text-decoration:none;">↗ In SharePoint</a>
           </div>
-          <div class="tkt-main" style="flex:1;overflow:hidden;">
+          <div style="flex:1;overflow:hidden;position:relative;display:flex;">
             <div style="flex:1;overflow:auto;" id="dev-sp-table-wrap">
               <div class="empty" id="dev-sp-empty">SP-Liste wird geladen…</div>
               <table class="tkt-table" id="dev-sp-table" style="display:none;">
@@ -476,10 +476,10 @@ header{
                 <tbody id="dev-sp-tbody"></tbody>
               </table>
             </div>
-            <div class="tkt-sidebar" id="dev-sp-sidebar">
+            <div id="dev-sp-sidebar" style="display:none;position:absolute;top:0;right:0;bottom:0;width:360px;background:#fff;border-left:1px solid var(--border);flex-direction:column;z-index:10;overflow:hidden;box-shadow:-4px 0 12px rgba(10,31,60,.1);">
               <div class="tkt-sidebar-hdr">
                 <div style="font-size:14px;font-weight:700;color:var(--navy);" id="dev-sp-sb-title">Eintrag</div>
-                <button class="tkt-close" onclick="$id('dev-sp-sidebar').classList.remove('open')">✕</button>
+                <button class="tkt-close" onclick="document.getElementById('dev-sp-sidebar').style.display='none'">✕</button>
               </div>
               <div class="tkt-sidebar-body" id="dev-sp-sb-body"></div>
               <div class="sidebar-actions" id="dev-sp-sb-actions"></div>
@@ -1050,7 +1050,12 @@ function renderTickets(list) {
     const status = f[cStatus] || f.Status || '';
     const _prioRaw = cPrio ? (f[cPrio]||'') : '';
     const prio = _prioRaw.replace(/^high$/i,'Hoch').replace(/^normal$/i,'Normal').replace(/^mittel$/i,'Normal').replace(/^Mittel$/,'Normal');
-    const assigned = cAssigned ? personName(f[cAssigned]) : '';
+    const _asgnRaw = cAssigned ? f[cAssigned] : null;
+    const assigned = _asgnRaw
+      ? (typeof _asgnRaw==='string' && !_asgnRaw.startsWith('[') && !_asgnRaw.startsWith('{')
+          ? _asgnRaw.replace(/\./g,' ').replace(/\w/g,c=>c.toUpperCase())  // "marco.maukisch" → "Marco Maukisch"
+          : personName(_asgnRaw))
+      : '';
     const kat = cKat ? (f[cKat]||'') : '';
     const werk = cWerk ? (f[cWerk]||'') : '';
     const art = cType ? (f[cType]||'') : '';
@@ -1309,7 +1314,7 @@ function applyFilters(list) {
     const titleStr=(f[cTitle]||f.Title||'').toLowerCase();
     const searchOk=!q||(q.replace(/^#/,'')===idStr)||(idStr.includes(q.replace(/^#/,'')))||titleStr.includes(q);
     const prioOk  = !pr||!cPrio||normPrio(f[cPrio])===pr;
-    const asgnOk  = !asgn||(cAsgn&&personName(f[cAsgn]).toLowerCase().includes(asgn.toLowerCase()));
+    const asgnOk  = !asgn||!cAsgn||personName(f[cAsgn]).toLowerCase().includes(asgn.toLowerCase());
     const katOk   = !kat||!cKat||(f[cKat]||'')===kat;
     const werkOk  = !wrk||!cWerk||(f[cWerk]||'')===wrk;
     const artOk   = !art||!cType||(f[cType]||'')===art;
@@ -2527,10 +2532,13 @@ function openDevDetail(deviceId) {
   });
   $id('dev-sb-body').innerHTML = html;
   $id('dev-sb-actions').innerHTML = `<button class="btn btn-ghost" onclick="closeDevSidebar()" style="flex:1;">Schließen</button>`;
-  $id('dev-sidebar').classList.add('open');
+  const _ds=$id('dev-sidebar'); if(_ds){ _ds.style.display='flex'; _ds.style.flexDirection='column'; }
 }
 
-function closeDevSidebar() { $id('dev-sidebar').classList.remove('open'); devEditingId=null; }
+function closeDevSidebar() {
+  const s=$id('dev-sidebar'); if(s) s.style.display='none';
+  devEditingId=null;
+}
 
 // ── DEVICE TABS ──
 let _devTab = 'azure';
@@ -2637,7 +2645,7 @@ function openDevSPDetail(id) {
   $id('dev-sp-sb-actions').innerHTML=`
     <button class="btn btn-primary" onclick="saveDevSP('${id}')" style="flex:1;">✓ Speichern</button>
     <button class="btn btn-ghost" onclick="$id('dev-sp-sidebar').classList.remove('open')">✕</button>`;
-  $id('dev-sp-sidebar').classList.add('open');
+  const _dss=$id('dev-sp-sidebar'); if(_dss){ _dss.style.display='flex'; _dss.style.flexDirection='column'; }
 }
 
 async function saveDevSP(id) {
