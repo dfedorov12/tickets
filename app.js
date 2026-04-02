@@ -849,12 +849,12 @@ function openTicketDetail(id) {
     <div style="display:flex;align-items:center;gap:10px;">
       <span class="st-badge" id="sb-status-badge-${id}" style="font-size:12px;padding:5px 14px;background:${stColors[curStatus]||'#666'}22;color:${stColors[curStatus]||'#666'};">${esc(curStatus)}</span>
       <select onchange="changeStatus('${id}',this.value)" style="padding:6px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;font-size:12px;cursor:pointer;">
-        ${statuses.map(s=>`<option value="${esc(s)}"${s===curStatus?' selected':''}>${esc(s)}</option>`).join('')}
+        ${(ticketChoices[colStatus]&&ticketChoices[colStatus].length?ticketChoices[colStatus]:statuses).map(s=>`<option value="${esc(s)}"${s===curStatus?' selected':''}>${esc(s)}</option>`).join('')}
       </select>
     </div>`;
 
   // Always show assigned field — try multiple known column names
-  const _assignedKey = assignedCol || col(['Zugewiesen','AssignedTo','Zugewiesen_x0020_an','Bearbeiter','ZugewiesenAn']);
+  const _assignedKey = assignedCol || _discoveredCols.asgn || col(['Zugewiesen','AssignedTo','Zugewiesen_x0020_an','Bearbeiter','ZugewiesenAn']);
   {
     const v = _assignedKey ? f[_assignedKey] : null;
     const nameStr = v ? personName(v) : '';
@@ -955,8 +955,12 @@ function openTicketDetail(id) {
   html+=`<div class="section-title">Kommentare</div>
     <div id="comments-${id}" style="margin-bottom:8px;"><span style="font-size:11px;color:var(--text-muted);">Lade…</span></div>
     <div id="comment-add-${id}" style="display:none;">
-      <textarea id="comment-input-${id}" rows="2" placeholder="Kommentar schreiben…"
-        style="width:100%;font-size:12px;padding:7px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;outline:none;resize:vertical;"></textarea>
+      <div style="position:relative;">
+        <textarea id="comment-input-${id}" rows="2" placeholder="Kommentar schreiben... (@Name für Erwähnung)"
+          style="width:100%;font-size:12px;padding:7px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;outline:none;resize:vertical;"
+          oninput="commentAtTrigger(this,'comment-input-${id}','sb-cmt-at-${id}')"></textarea>
+        <div id="sb-cmt-at-${id}" style="display:none;position:absolute;bottom:100%;left:0;background:#fff;border:1.5px solid var(--border2);border-radius:7px 7px 0 0;z-index:202;max-height:180px;min-width:220px;overflow:auto;box-shadow:var(--shadow);"></div>
+      </div>
       <button onclick="postTicketComment('${id}')"
         style="margin-top:4px;padding:5px 14px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">
         Kommentar senden
@@ -986,8 +990,8 @@ function openTicketDetail(id) {
   fetchTicketAttachments(id);
 }
 
-async function fetchTicketComments(id) {
-  const container = $id('comments-'+id);
+async function fetchTicketComments(id, containerId) {
+  const container = $id(containerId||'comments-'+id);
   if (!container) return;
   try {
     const spTok = await getSpToken();
@@ -1021,22 +1025,114 @@ async function fetchTicketComments(id) {
   }
 }
 
-async function postTicketComment(id) {
-  const ta = $id('comment-input-'+id);
+let _commentMentions = {};
+
+function commentAtTrigger(ta, taId, ddId) {
+  const dd = $id(ddId);
+  if (!dd) return;
+  const pos = ta.selectionStart;
+  const before = ta.value.substring(0, pos);
+  const atIdx = before.lastIndexOf('@');
+  if (atIdx === -1 || (atIdx > 0 && /\S/.test(before[atIdx-1]))) { dd.style.display='none'; return; }
+  const q = before.substring(atIdx+1);
+  if (q.length < 2) { dd.style.display='none'; return; }
+  clearTimeout(_userSearchTimer);
+  _userSearchTimer = setTimeout(async ()=>{
+    try {
+      const res = await gGet('/users?$filter=startswith(displayName,''+encodeURIComponent(q)+'')&$select=id,displayName,mail,userPrincipalName&$top=6');
+      const users = res.value||[];
+      if (!users.length) { dd.style.display='none'; return; }
+      dd.innerHTML = users.map(u=>'<div style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);"'+
+        ' onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"'+
+        ' data-name="'+esc(u.displayName)+'" data-mail="'+esc(u.mail||u.userPrincipalName||'')+'"'+
+        ' onclick="selectCommentMention(this,''+taId+'',''+ddId+'')">'+
+        '<div style="font-weight:600;">'+esc(u.displayName)+'</div>'+
+        '<div style="font-size:10px;color:var(--text-muted);">'+esc(u.mail||u.userPrincipalName||'')+'</div></div>').join('');
+      dd.style.display = 'block';
+    } catch(e) { dd.style.display='none'; }
+  }, 300);
+}
+
+function selectCommentMention(el, taId, ddId) {
+  const ta = $id(taId);
+  const dd = $id(ddId);
+  if (!ta || !dd) return;
+  const name = el.dataset.name||'';
+  const mail = el.dataset.mail||'';
+  const pos = ta.selectionStart;
+  const before = ta.value.substring(0, pos);
+  const atIdx = before.lastIndexOf('@');
+  ta.value = ta.value.substring(0, atIdx) + '@' + name + ' ' + ta.value.substring(pos);
+  if (!_commentMentions[taId]) _commentMentions[taId] = [];
+  _commentMentions[taId].push({name, mail});
+  dd.style.display = 'none';
+  ta.focus();
+}
+
+async function postTicketComment(id, inputId) {
+  const taId = inputId || 'comment-input-'+id;
+  const ctnId = inputId && inputId.startsWith('dt-') ? 'dt-comments-'+id : 'comments-'+id;
+  const ta = $id(taId);
   const text = (ta?.value||'').trim();
   if (!text) return;
+  const mentions = (_commentMentions[taId]||[]).map((m,i)=>({
+    id:i, mentionText:'@'+m.name,
+    mentioned:{user:{displayName:m.name, loginName:'i:0#.f|membership|'+m.mail}}
+  }));
   try {
     const spTok = await getSpToken();
+    const body = mentions.length ? {text, mentions} : {text};
     const r = await fetch(
-      `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/GetItemById(${id})/Comments`,
+      'https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid''+ticketListId+'')/GetItemById('+id+')/Comments',
       {method:'POST', headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=nometadata','Content-Type':'application/json'},
-       body:JSON.stringify({text})}
+       body:JSON.stringify(body)}
     );
     if (!r.ok) throw new Error('HTTP '+r.status);
     ta.value='';
-    toast('Kommentar gespeichert ✓','success');
-    fetchTicketComments(id);
+    delete _commentMentions[taId];
+    toast('Kommentar gespeichert','success');
+    fetchTicketComments(id, ctnId);
   } catch(e) { toast('Fehler: '+e.message,'error'); }
+}
+
+async function deleteAttachment(ticketId, fileName) {
+  if (!confirm('Anhang "' + fileName + '" wirklich loeschen?')) return;
+  try {
+    const spTok = await getSpToken();
+    const r = await fetch(
+      `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/items(${ticketId})/AttachmentFiles('${encodeURIComponent(fileName)}')`,
+      {method:'DELETE', headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=verbose',
+       'X-HTTP-Method':'DELETE','If-Match':'*'}}
+    );
+    if (!r.ok && r.status !== 200 && r.status !== 204) throw new Error('HTTP '+r.status);
+    toast('Anhang geloescht','success');
+    fetchTicketAttachments(ticketId);
+    fetchTicketAttachmentsTo(ticketId,'dt-atts-'+ticketId);
+    fetchTicketAttachmentsFs(ticketId);
+    const it = allTickets.find(t=>t.id==ticketId);
+    if(it && it._attachCount>0) it._attachCount--;
+  } catch(e){ toast('Loeschen fehlgeschlagen: '+e.message,'error'); }
+}
+
+function _renderAttachFiles(files, container, ticketId) {
+  container.innerHTML = '';
+  if (!files.length) { container.innerHTML='<span style="font-size:11px;color:var(--text-muted);">Keine Anhaenge</span>'; return; }
+  files.forEach(a=>{
+    const fileName = a.FileName||'Anhang';
+    const url = a.ServerRelativeUrl ? 'https://dihag.sharepoint.com'+a.ServerRelativeUrl : (a.AbsoluteUri||'#');
+    const wrap = document.createElement('span');
+    wrap.style.cssText='display:inline-flex;align-items:center;gap:0;margin:0 4px 4px 0;';
+    const link = document.createElement('a');
+    link.href=url; link.target='_blank'; link.className='attach-pill';
+    link.style.cssText='border-radius:6px 0 0 6px;margin:0;';
+    link.textContent='📎 '+fileName;
+    const del = document.createElement('button');
+    del.title='Anhang loeschen'; del.textContent='✕';
+    del.style.cssText='padding:5px 8px;background:var(--red-bg);border:1px solid var(--red);border-left:none;border-radius:0 6px 6px 0;cursor:pointer;font-size:10px;color:var(--red);font-weight:700;';
+    del.onclick=()=>deleteAttachment(ticketId, fileName);
+    wrap.appendChild(link); wrap.appendChild(del);
+    container.appendChild(wrap);
+  });
 }
 
 async function fetchTicketAttachments(id) {
@@ -1054,20 +1150,7 @@ async function fetchTicketAttachments(id) {
     const it = allTickets.find(t=>t.id==id);
     if (it) it._attachCount = files.length;
 
-    container.innerHTML = '';
-    if (!files.length) {
-      container.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">Keine Anhänge</span>';
-      return;
-    }
-    files.forEach(a=>{
-      const url = a.ServerRelativeUrl
-        ? 'https://dihag.sharepoint.com'+a.ServerRelativeUrl
-        : (a.AbsoluteUri||'#');
-      const link = document.createElement('a');
-      link.href=url; link.target='_blank'; link.className='attach-pill';
-      link.textContent='📎 '+(a.FileName||'Anhang');
-      container.appendChild(link);
-    });
+    _renderAttachFiles(files, container, id);
   } catch(e) {
     if (container) container.innerHTML='<span style="font-size:11px;color:var(--red);">'+esc(e.message)+'</span>';
   }
@@ -1196,7 +1279,12 @@ function showTicketDetailPanel(id) {
     }
   });
 
-  const stOpts = statuses.map(s=>`<option value="${esc(s)}"${s===curStatus?' selected':''}>${esc(s)}</option>`).join('');
+  const _sOpts = ticketChoices[colStatus]&&ticketChoices[colStatus].length?ticketChoices[colStatus]:statuses;
+  const stOpts = _sOpts.map(s=>`<option value="${esc(s)}"${s===curStatus?' selected':''}>${esc(s)}</option>`).join('');
+
+  const _dtAsnKey = cAssign || _discoveredCols.asgn || col(['Zugewiesen','AssignedTo','Zugewiesen_x0020_an','Bearbeiter','ZugewiesenAn']);
+  const _dtAsnName = _dtAsnKey ? personName(f[_dtAsnKey]||'') : '';
+  const dtAsnFid = 'dtasn_'+id;
 
   $id('tkt-detail-content').innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap;">
@@ -1210,10 +1298,35 @@ function showTicketDetailPanel(id) {
       </select>
       <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">Erstellt: ${fmtFull(it.createdDateTime)}</span>
     </div>
+    <div style="margin-bottom:14px;max-width:360px;">
+      <label style="display:block;font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Zugewiesen an</label>
+      <div style="position:relative;">
+        <input id="${dtAsnFid}" data-fk-person="${esc(_dtAsnKey||'AssignedTo')}" value="${esc(_dtAsnName)}"
+          style="width:100%;padding:7px 11px;border:1.5px solid var(--border2);border-radius:6px;font-size:12px;outline:none;"
+          placeholder="Name suchen..." autocomplete="off" oninput="searchUsers(this,'${dtAsnFid}_dd')"/>
+        <div id="${dtAsnFid}_dd" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid var(--border2);border-top:none;border-radius:0 0 7px 7px;z-index:201;max-height:180px;overflow:auto;box-shadow:var(--shadow);"></div>
+        <input type="hidden" id="${dtAsnFid}_id" data-fk="${esc(_dtAsnKey||'AssignedTo')}LookupId"/>
+      </div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;" id="dt-fields-${id}">${fieldsHtml}</div>
-    <div class="section-title" style="margin-top:20px;">Anhänge</div>
+    <div class="section-title" style="margin-top:20px;">Kommentare</div>
+    <div id="dt-comments-${id}" style="margin-bottom:8px;"><span style="font-size:11px;color:var(--text-muted);">Lade...</span></div>
+    <div id="dt-comment-add-${id}">
+      <div style="position:relative;">
+        <textarea id="dt-cmt-in-${id}" rows="2"
+          placeholder="Kommentar schreiben... (@Name fuer Erwaehnung)"
+          style="width:100%;font-size:12px;padding:7px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;outline:none;resize:vertical;"
+          oninput="commentAtTrigger(this,'dt-cmt-in-${id}','dt-cmt-at-${id}')"></textarea>
+        <div id="dt-cmt-at-${id}" style="display:none;position:absolute;bottom:100%;left:0;background:#fff;border:1.5px solid var(--border2);border-radius:7px 7px 0 0;z-index:202;max-height:180px;min-width:220px;overflow:auto;box-shadow:var(--shadow);"></div>
+      </div>
+      <button onclick="postTicketComment('${id}','dt-cmt-in-${id}')"
+        style="margin-top:4px;padding:5px 14px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">
+        Kommentar senden
+      </button>
+    </div>
+    <div class="section-title" style="margin-top:20px;">Anhaenge</div>
     <div id="dt-atts-${id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"><span style="font-size:11px;color:var(--text-muted);">Lade...</span></div>
-    <label class="attach-pill" style="cursor:pointer;">＋ Datei(en) anhängen<input type="file" multiple style="display:none;" onchange="uploadAttachments(this.files,'${id}')"/></label>`;
+    <label class="attach-pill" style="cursor:pointer;">+ Datei(en) anhaengen<input type="file" multiple style="display:none;" onchange="uploadAttachments(this.files,'${id}')"/></label>`;
 
   // Attach desc-edit buttons
   $id('tkt-detail-content').querySelectorAll('.desc-edit-btn').forEach(btn=>{
@@ -1229,6 +1342,7 @@ function showTicketDetailPanel(id) {
     inp.addEventListener('input', ()=>searchUsers(inp, ddId));
   });
 
+  fetchTicketComments(id, 'dt-comments-'+id);
   fetchTicketAttachmentsTo(id, 'dt-atts-'+id);
 }
 async function fetchTicketAttachmentsTo(id, containerId) {
@@ -1240,13 +1354,7 @@ async function fetchTicketAttachmentsTo(id, containerId) {
       {headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=verbose'}});
     const j = await r.json();
     const files = j?.d?.results||j?.value||[];
-    container.innerHTML = '';
-    if(!files.length){ container.innerHTML='<span style="font-size:11px;color:var(--text-muted);">Keine Anhänge</span>'; return; }
-    files.forEach(a=>{
-      const url=a.ServerRelativeUrl?'https://dihag.sharepoint.com'+a.ServerRelativeUrl:(a.AbsoluteUri||'#');
-      const link=document.createElement('a'); link.href=url; link.target='_blank'; link.className='attach-pill';
-      link.textContent='📎 '+(a.FileName||'Anhang'); container.appendChild(link);
-    });
+    _renderAttachFiles(files, container, id);
   } catch(e){ if(container) container.innerHTML='<span style="font-size:11px;color:var(--red);">'+esc(e.message)+'</span>'; }
 }
 
@@ -1504,17 +1612,7 @@ async function fetchTicketAttachmentsFs(id) {
     );
     const j = await r.json();
     const files = j?.d?.results||j?.value||[];
-    container.innerHTML = '';
-    if (!files.length) { container.innerHTML = '<span style="font-size:11px;color:var(--text-muted);">Keine Anhänge</span>'; return; }
-    files.forEach(a=>{
-      const url = a.ServerRelativeUrl
-        ? 'https://dihag.sharepoint.com'+a.ServerRelativeUrl
-        : (a.AbsoluteUri||'#');
-      const link = document.createElement('a');
-      link.href=url; link.target='_blank'; link.className='attach-pill';
-      link.textContent='📎 '+(a.FileName||'Anhang');
-      container.appendChild(link);
-    });
+    _renderAttachFiles(files, container, id);
   } catch(e) { if(container) container.innerHTML='<span style="font-size:11px;color:var(--red);">'+esc(e.message)+'</span>'; }
 }
 
