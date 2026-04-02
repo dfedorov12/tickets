@@ -950,9 +950,9 @@ let displayedCount = 100;
 // ── TICKET CACHE (sessionStorage) — schlanke Version ──
 // Speichert nur die für die Anzeige nötigen Felder (kein vollständiges fields-Objekt)
 const CACHE_FIELD_KEYS = ['Title','Status','Priorit_x00e4_t','Priorität','Priority','Prio',
-  'Zugewiesen','AssignedTo','Zugewiesen_x0020_an','Bearbeiter',
+  'Zugewiesen','AssignedTo','Zugewiesen_x0020_an','Bearbeiter','ZugewiesenAn','Assigned_x0020_To',
   'Kategorie','Category','Typ','Type','Werk','Standort','Site',
-  'Art','Ticketart','TicketType','Beschreibung','Description'];
+  'Art','Ticketart','TicketType','Beschreibung','Description','Kommentar','Inhalt'];
 
 function slimTicket(t) {
   const f = t.fields||{};
@@ -1038,7 +1038,7 @@ function renderTickets(list) {
   const cTitle    = getCol('title') || 'Title';
   const cStatus   = getCol('status') || 'Status';
   const cPrio     = getCol('prio');
-  const cAssigned = getCol('assigned');
+  const cAssigned = getCol('assigned') || _discoveredCols.asgn;
   const cKat      = getCol('category');
   const cWerk     = getCol('werk');
   const cType     = getCol('type');
@@ -1050,7 +1050,8 @@ function renderTickets(list) {
     const status = f[cStatus] || f.Status || '';
     const _prioRaw = cPrio ? (f[cPrio]||'') : '';
     const prio = _prioRaw.replace(/^high$/i,'Hoch').replace(/^normal$/i,'Normal').replace(/^mittel$/i,'Normal').replace(/^Mittel$/,'Normal');
-    const _asgnRaw = cAssigned ? f[cAssigned] : null;
+    const _asgnRaw = cAssigned ? f[cAssigned]
+      : (f['Zugewiesen']||f['AssignedTo']||f['Zugewiesen_x0020_an']||f['Bearbeiter']||f['ZugewiesenAn']||null);
     const assigned = _asgnRaw
       ? (typeof _asgnRaw==='string' && !_asgnRaw.startsWith('[') && !_asgnRaw.startsWith('{')
           ? _asgnRaw.replace(/\./g,' ').replace(/\w/g,c=>c.toUpperCase())  // "marco.maukisch" → "Marco Maukisch"
@@ -1201,25 +1202,17 @@ async function refreshNewTickets() {
   if (btn) { btn.disabled=true; btn.textContent='⏳'; }
   try {
     const existingIds = new Set(allTickets.map(t=>t.id));
-    // Fetch last 100 items by SP item ID (highest ID = newest) — no filter/orderby needed
-    // SP returns items in ID ascending order by default, so we get the newest on the last page
-    // Use $skiptoken trick: fetch two pages, combine, dedup
-    const url1 = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$top=100`;
-    const d1 = await gGet(url1, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
-    let incoming = d1.value||[];
-    // If there's a next page, also fetch it (catches large lists where new items are on last page)
-    if (d1['@odata.nextLink']) {
-      try {
-        let nUrl = d1['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','');
-        // Keep following until no more nextLink or we have enough
-        let pages = 0;
-        while (nUrl && pages < 10) {
-          const dn = await gGet(nUrl, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
-          incoming = [...incoming, ...(dn.value||[])];
-          nUrl = dn['@odata.nextLink'] ? dn['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
-          pages++;
-        }
-      } catch(e2) { dbg('Refresh paging error', e2.message); }
+    // Use the newest known ticket's date as baseline — only fetch items created after that
+    const newestDate = allTickets[0]?.createdDateTime || new Date(Date.now()-3600000).toISOString();
+    let url1 = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$filter=fields/Created gt '${newestDate}'&$top=100`;
+    let incoming = [];
+    let nUrl = url1;
+    let pages = 0;
+    while (nUrl && pages < 10) {
+      const d = await gGet(nUrl, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
+      incoming = [...incoming, ...(d.value||[])];
+      nUrl = d['@odata.nextLink'] ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+      pages++;
     }
     const freshNew = incoming.filter(t=>!existingIds.has(t.id));
     dbg('Smart Refresh: incoming='+incoming.length+' new='+freshNew.length);
@@ -1313,8 +1306,10 @@ function applyFilters(list) {
     const idStr=String(it.id);
     const titleStr=(f[cTitle]||f.Title||'').toLowerCase();
     const searchOk=!q||(q.replace(/^#/,'')===idStr)||(idStr.includes(q.replace(/^#/,'')))||titleStr.includes(q);
-    const prioOk  = !pr||!cPrio||normPrio(f[cPrio])===pr;
-    const asgnOk  = !asgn||!cAsgn||personName(f[cAsgn]).toLowerCase().includes(asgn.toLowerCase());
+    const _prioVal = cPrio ? f[cPrio] : (f['Priorit_x00e4_t']||f['Priorität']||f['Priority']||f['Prio']||'');
+    const prioOk  = !pr||normPrio(_prioVal)===pr;
+    const _asgnVal = cAsgn ? f[cAsgn] : (f['Zugewiesen']||f['AssignedTo']||f['Zugewiesen_x0020_an']||f['Bearbeiter']||f['ZugewiesenAn']||'');
+    const asgnOk  = !asgn||personName(_asgnVal).toLowerCase().includes(asgn.toLowerCase());
     const katOk   = !kat||!cKat||(f[cKat]||'')===kat;
     const werkOk  = !wrk||!cWerk||(f[cWerk]||'')===wrk;
     const artOk   = !art||!cType||(f[cType]||'')===art;
@@ -1470,13 +1465,14 @@ function openTicketDetail(id) {
     if(v===null||v===undefined||v==='') return; // skip empty
     const label = ticketCols[k]||k;
 
-    // Description or any rich text HTML field → clean and formatted
+    // Description/comment or any rich text HTML field → editable textarea + formatted preview
     if(k===descCol || isRichText(v)) {
       const rendered = cleanHtml(v);
+      const taId = 'ta_'+k.replace(/[^a-z0-9]/gi,'_');
+      const pvId = 'pv_'+k.replace(/[^a-z0-9]/gi,'_');
       html+=`<div class="field-row"><label>${esc(label)}</label>
-        <div class="desc-box" style="padding:10px 12px;border:1.5px solid var(--border2);border-radius:6px;font-size:12px;line-height:1.7;background:var(--bg);min-height:40px;word-break:break-word;">${rendered}</div>
-        <textarea data-fk="${esc(k)}" style="font-size:12px;margin-top:6px;display:none;" rows="4">${esc(String(v||''))}</textarea>
-        <button onclick="this.previousElementSibling.style.display='';this.previousElementSibling.previousElementSibling.style.display='none';this.style.display='none';" style="font-size:10px;color:var(--blue);background:none;border:none;cursor:pointer;margin-top:4px;">✏️ Bearbeiten</button>
+        <div id="${pvId}" class="desc-box" style="padding:10px 12px;border:1.5px solid var(--border2);border-radius:6px;font-size:12px;line-height:1.7;background:var(--bg);min-height:40px;word-break:break-word;cursor:pointer;" title="Klicken zum Bearbeiten" onclick="this.style.display='none';document.getElementById('${taId}').style.display='';document.getElementById('${taId}').focus();">${rendered}<br><span style="font-size:10px;color:var(--blue);display:block;margin-top:4px;">✏️ Klicken zum Bearbeiten</span></div>
+        <textarea id="${taId}" data-fk="${esc(k)}" style="font-size:12px;margin-top:0;display:none;width:100%;min-height:120px;padding:8px 11px;border:1.5px solid var(--navy);border-radius:6px;font-family:inherit;outline:none;" rows="6" onblur="if(!this.value.trim()){document.getElementById('${pvId}').style.display='';this.style.display='none';}">${esc(String(v||''))}</textarea>
       </div>`;
       return;
     }
@@ -1687,10 +1683,12 @@ function showTicketDetailPanel(id) {
     const isDesc   = k===cDesc||isRichText(v);
 
     if(isDesc){
+      const taId2='ta2_'+k.replace(/[^a-z0-9]/gi,'_');
+      const pvId2='pv2_'+k.replace(/[^a-z0-9]/gi,'_');
       fieldsHtml+=`<div class="field-row" style="grid-column:1/-1"><label>${esc(label)}</label>
-        <div class="desc-box" style="padding:10px 12px;border:1.5px solid var(--border2);border-radius:6px;font-size:13px;line-height:1.7;background:var(--bg);">${cleanHtml(v)}</div>
-        <textarea data-fk="${esc(k)}" style="display:none;font-size:12px;margin-top:6px;" rows="5">${esc(String(v||''))}</textarea>
-        <button class="desc-edit-btn" style="font-size:10px;color:var(--blue);background:none;border:none;cursor:pointer;margin-top:4px;">✏️ Bearbeiten</button></div>`;
+        <div id="${pvId2}" class="desc-box" style="padding:10px 12px;border:1.5px solid var(--border2);border-radius:6px;font-size:13px;line-height:1.7;background:var(--bg);cursor:pointer;" title="Klicken zum Bearbeiten" onclick="this.style.display='none';document.getElementById('${taId2}').style.display='';document.getElementById('${taId2}').focus();">${cleanHtml(v)}<br><span style="font-size:10px;color:var(--blue);display:block;margin-top:4px;">✏️ Klicken zum Bearbeiten</span></div>
+        <textarea id="${taId2}" data-fk="${esc(k)}" style="display:none;font-size:12px;margin-top:0;width:100%;min-height:120px;padding:8px 11px;border:1.5px solid var(--navy);border-radius:6px;font-family:inherit;outline:none;" rows="6" onblur="if(!this.value.trim()){document.getElementById('${pvId2}').style.display='';this.style.display='none';}">${esc(String(v||''))}</textarea>
+        </div>`;
     } else if(isAssign){
       const fid='dtppl_'+k.replace(/[^a-z0-9]/gi,'_');
       fieldsHtml+=`<div class="field-row"><label>${esc(label)}</label>
@@ -1920,10 +1918,11 @@ function openTicketFullscreen(id) {
     // Description / rich text
     if(k===descCol || isRichText(v)) {
       const rendered = cleanHtml(v);
+      const taId3='ta3_'+k.replace(/[^a-z0-9]/gi,'_');
+      const pvId3='pv3_'+k.replace(/[^a-z0-9]/gi,'_');
       html+=`<div class="fs-field fs-body-full"><div class="fs-field-label">${esc(label)}</div>
-        <div class="fs-desc-box">${rendered}</div>
-        <textarea data-fk="${esc(k)}" style="font-size:12px;margin-top:6px;display:none;width:100%;min-height:80px;padding:8px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;" rows="4">${esc(String(v||''))}</textarea>
-        <button onclick="this.previousElementSibling.style.display='';this.previousElementSibling.previousElementSibling.style.display='none';this.style.display='none';" style="font-size:10px;color:var(--blue);background:none;border:none;cursor:pointer;margin-top:4px;">✏️ Bearbeiten</button>
+        <div id="${pvId3}" class="fs-desc-box" style="cursor:pointer;" title="Klicken zum Bearbeiten" onclick="this.style.display='none';document.getElementById('${taId3}').style.display='';document.getElementById('${taId3}').focus();">${rendered}<br><span style="font-size:10px;color:var(--blue);display:block;margin-top:4px;">✏️ Klicken zum Bearbeiten</span></div>
+        <textarea id="${taId3}" data-fk="${esc(k)}" style="font-size:12px;margin-top:0;display:none;width:100%;min-height:120px;padding:8px;border:1.5px solid var(--navy);border-radius:6px;font-family:inherit;outline:none;" rows="6" onblur="if(!this.value.trim()){document.getElementById('${pvId3}').style.display='';this.style.display='none';}">${esc(String(v||''))}</textarea>
       </div>`;
       return;
     }
