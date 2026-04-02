@@ -52,7 +52,14 @@ function stripReadOnly(fields) {
     if (k.endsWith('LookupId')) {
       if (!ticketCols[k.replace(/LookupId$/, '')]) return; // unknown field — skip
       const intVal = parseInt(v, 10);
-      if (!isNaN(intVal)) clean[k] = intVal;              // SP requires integer
+      if (isNaN(intVal)) return;
+      const baseName = k.replace(/LookupId$/, '');
+      if (ticketMultiCols.has(baseName)) {
+        clean[k + '@odata.type'] = 'Collection(Edm.Int32)';
+        clean[k] = [intVal];
+      } else {
+        clean[k] = intVal;
+      }
       return;
     }
     clean[k] = v;
@@ -365,6 +372,7 @@ let ticketSiteId = null;
 let ticketListId = null;
 let ticketCols   = {};   // internal → display
 let ticketChoices= {};   // internal → [choice1, choice2, ...]
+let ticketMultiCols = new Set(); // internal names of multi-value person/lookup columns
 let allTickets   = [];
 let editingId    = null;
 let allNextLink  = null;
@@ -563,8 +571,9 @@ async function initTickets() {
     const cols = await gGet(`/sites/${ticketSiteId}/lists/${ticketListId}/columns?$top=200`);
     (cols.value||[]).forEach(c=>{
       if(!c.readOnly) ticketCols[c.name]=c.displayName;
-      // Store choice options for dropdown fields
       if(c.choice?.choices?.length) ticketChoices[c.name]=c.choice.choices;
+      if(c.personOrGroup?.allowMultipleSelection || c.lookup?.allowMultipleValues)
+        ticketMultiCols.add(c.name);
     });
     dbg('Spalten geladen', {anzahl: Object.keys(ticketCols).length, choices: Object.keys(ticketChoices)});
     streamTickets();
@@ -1083,16 +1092,18 @@ async function postTicketComment(id, inputId) {
   if (!text) return;
   const mentions = (_commentMentions[taId]||[]).map((m,i)=>({
     id:i, mentionText:'@'+m.name,
-    mentioned:{user:{displayName:m.name, loginName:'i:0#.f|membership|'+m.mail}}
+    mentioned:{user:{name:m.name, loginName:'i:0#.f|membership|'+m.mail}}
   }));
   try {
     const spTok = await getSpToken();
     const body = mentions.length ? {text, mentions} : {text};
-    const r = await fetch(
-      `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/GetItemById(${id})/Comments`,
-      {method:'POST', headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=verbose','Content-Type':'application/json;odata=verbose'},
-       body:JSON.stringify(body)}
-    );
+    const url = `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/GetItemById(${id})/Comments`;
+    const headers = {Authorization:'Bearer '+spTok, Accept:'application/json;odata=nometadata','Content-Type':'application/json'};
+    let r = await fetch(url, {method:'POST', headers, body:JSON.stringify(body)});
+    // If mentions caused 400, retry as plain text (SP may not support mention format)
+    if (!r.ok && r.status===400 && mentions.length) {
+      r = await fetch(url, {method:'POST', headers, body:JSON.stringify({text})});
+    }
     if (!r.ok) throw new Error('HTTP '+r.status);
     ta.value='';
     delete _commentMentions[taId];
