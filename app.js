@@ -1039,15 +1039,17 @@ function commentAtTrigger(ta, taId, ddId) {
   clearTimeout(_userSearchTimer);
   _userSearchTimer = setTimeout(async ()=>{
     try {
-      const res = await gGet('/users?$filter=startswith(displayName,''+encodeURIComponent(q)+'')&$select=id,displayName,mail,userPrincipalName&$top=6');
+      const res = await gGet(`/users?$filter=startswith(displayName,'${encodeURIComponent(q)}')&$select=id,displayName,mail,userPrincipalName&$top=6`);
       const users = res.value||[];
       if (!users.length) { dd.style.display='none'; return; }
-      dd.innerHTML = users.map(u=>'<div style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);"'+
-        ' onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"'+
-        ' data-name="'+esc(u.displayName)+'" data-mail="'+esc(u.mail||u.userPrincipalName||'')+'"'+
-        ' onclick="selectCommentMention(this,''+taId+'',''+ddId+'')">'+
-        '<div style="font-weight:600;">'+esc(u.displayName)+'</div>'+
-        '<div style="font-size:10px;color:var(--text-muted);">'+esc(u.mail||u.userPrincipalName||'')+'</div></div>').join('');
+      dd.innerHTML = users.map(u=>`
+        <div style="padding:8px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);"
+          onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''"
+          data-name="${esc(u.displayName)}" data-mail="${esc(u.mail||u.userPrincipalName||'')}"
+          onclick="selectCommentMention(this,'${taId}','${ddId}')">
+          <div style="font-weight:600;">${esc(u.displayName)}</div>
+          <div style="font-size:10px;color:var(--text-muted);">${esc(u.mail||u.userPrincipalName||'')}</div>
+        </div>`).join('');
       dd.style.display = 'block';
     } catch(e) { dd.style.display='none'; }
   }, 300);
@@ -1083,7 +1085,7 @@ async function postTicketComment(id, inputId) {
     const spTok = await getSpToken();
     const body = mentions.length ? {text, mentions} : {text};
     const r = await fetch(
-      'https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid''+ticketListId+'')/GetItemById('+id+')/Comments',
+      `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/GetItemById(${id})/Comments`,
       {method:'POST', headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=nometadata','Content-Type':'application/json'},
        body:JSON.stringify(body)}
     );
@@ -1096,7 +1098,7 @@ async function postTicketComment(id, inputId) {
 }
 
 async function deleteAttachment(ticketId, fileName) {
-  if (!confirm('Anhang "' + fileName + '" wirklich loeschen?')) return;
+  if (!confirm(`Anhang "${fileName}" wirklich löschen?`)) return;
   try {
     const spTok = await getSpToken();
     const r = await fetch(
@@ -1116,7 +1118,7 @@ async function deleteAttachment(ticketId, fileName) {
 
 function _renderAttachFiles(files, container, ticketId) {
   container.innerHTML = '';
-  if (!files.length) { container.innerHTML='<span style="font-size:11px;color:var(--text-muted);">Keine Anhaenge</span>'; return; }
+  if (!files.length) { container.innerHTML='<span style="font-size:11px;color:var(--text-muted);">Keine Anhänge</span>'; return; }
   files.forEach(a=>{
     const fileName = a.FileName||'Anhang';
     const url = a.ServerRelativeUrl ? 'https://dihag.sharepoint.com'+a.ServerRelativeUrl : (a.AbsoluteUri||'#');
@@ -1314,7 +1316,7 @@ function showTicketDetailPanel(id) {
     <div id="dt-comment-add-${id}">
       <div style="position:relative;">
         <textarea id="dt-cmt-in-${id}" rows="2"
-          placeholder="Kommentar schreiben... (@Name fuer Erwaehnung)"
+          placeholder="Kommentar schreiben... (@Name für Erwähnung)"
           style="width:100%;font-size:12px;padding:7px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;outline:none;resize:vertical;"
           oninput="commentAtTrigger(this,'dt-cmt-in-${id}','dt-cmt-at-${id}')"></textarea>
         <div id="dt-cmt-at-${id}" style="display:none;position:absolute;bottom:100%;left:0;background:#fff;border:1.5px solid var(--border2);border-radius:7px 7px 0 0;z-index:202;max-height:180px;min-width:220px;overflow:auto;box-shadow:var(--shadow);"></div>
@@ -1324,9 +1326,9 @@ function showTicketDetailPanel(id) {
         Kommentar senden
       </button>
     </div>
-    <div class="section-title" style="margin-top:20px;">Anhaenge</div>
+    <div class="section-title" style="margin-top:20px;">Anhänge</div>
     <div id="dt-atts-${id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"><span style="font-size:11px;color:var(--text-muted);">Lade...</span></div>
-    <label class="attach-pill" style="cursor:pointer;">+ Datei(en) anhaengen<input type="file" multiple style="display:none;" onchange="uploadAttachments(this.files,'${id}')"/></label>`;
+    <label class="attach-pill" style="cursor:pointer;">＋ Datei(en) anhängen<input type="file" multiple style="display:none;" onchange="uploadAttachments(this.files,'${id}')"/></label>`;
 
   // Attach desc-edit buttons
   $id('tkt-detail-content').querySelectorAll('.desc-edit-btn').forEach(btn=>{
