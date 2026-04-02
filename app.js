@@ -721,6 +721,8 @@ function applyFilters(list) {
     const idStr=String(it.id);
     const titleStr=(f[cTitle]||f.Title||'').toLowerCase();
     const searchOk=!q||(q.replace(/^#/,'')===idStr)||(idStr.includes(q.replace(/^#/,'')))||titleStr.includes(q);
+    const statusVal = f[cStatus]||f.Status||'';
+    const statusOk  = !st || statusVal === st || statusVal.includes(st);
     const _prioVal = cPrio ? f[cPrio] : (f['Priorit_x00e4_t']||f['Priorität']||f['Priority']||f['Prio']||'');
     const prioOk  = !pr||normPrio(_prioVal)===pr;
     const _asgnVal = cAsgn ? f[cAsgn] : (f['Zugewiesen']||f['AssignedTo']||f['Zugewiesen_x0020_an']||f['Bearbeiter']||f['ZugewiesenAn']||'');
@@ -728,7 +730,7 @@ function applyFilters(list) {
     const katOk   = !kat||!cKat||(f[cKat]||'')===kat;
     const werkOk  = !wrk||!cWerk||(f[cWerk]||'')===wrk;
     const artOk   = !art||!cType||(f[cType]||'')===art;
-    return searchOk&&prioOk&&asgnOk&&katOk&&werkOk&&artOk;
+    return searchOk&&statusOk&&prioOk&&asgnOk&&katOk&&werkOk&&artOk;
   });
 }
 
@@ -832,8 +834,8 @@ function openTicketDetail(id) {
   const colStatus  = col(['Status'])||'Status';
   const curStatus  = f[colStatus]||f.Status||'Offen';
   const assignedCol= getCol('assigned');
-  const statuses   = ['Offen','Neu','In Bearbeitung','Warten auf Rückmeldung','Erledigt','Abgebrochen'];
-  const stColors   = {Offen:'var(--blue)',Neu:'#6366f1','In Bearbeitung':'var(--yellow)','Warten auf Rückmeldung':'var(--orange)',Erledigt:'var(--green)',Abgebrochen:'#6b7280'};
+  const statuses = TICKET_STATUSES;
+  const stColors = STATUS_COLORS;
 
   let html = `<div class="section-title">Status</div>
     <div style="display:flex;align-items:center;gap:10px;">
@@ -947,6 +949,16 @@ function openTicketDetail(id) {
   });
 
   // Attachments — fetched via SP REST (Graph doesn't support AttachmentFiles expand)
+  html+=`<div class="section-title">Kommentare</div>
+    <div id="comments-${id}" style="margin-bottom:8px;"><span style="font-size:11px;color:var(--text-muted);">Lade…</span></div>
+    <div id="comment-add-${id}" style="display:none;">
+      <textarea id="comment-input-${id}" rows="2" placeholder="Kommentar schreiben…"
+        style="width:100%;font-size:12px;padding:7px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;outline:none;resize:vertical;"></textarea>
+      <button onclick="postTicketComment('${id}')"
+        style="margin-top:4px;padding:5px 14px;background:var(--navy);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;">
+        Kommentar senden
+      </button>
+    </div>`;
   html+=`<div class="section-title">Anhänge</div>
     <div id="atts-${id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
       <span style="font-size:11px;color:var(--text-muted);">Lade…</span></div>`;
@@ -967,8 +979,61 @@ function openTicketDetail(id) {
     <button class="btn btn-ghost"   onclick="closeSidebar()">✕</button>`;
 
   sidebar.classList.add('open');
-  // Fetch attachments async via SP REST
+  fetchTicketComments(id);
   fetchTicketAttachments(id);
+}
+
+async function fetchTicketComments(id) {
+  const container = $id('comments-'+id);
+  if (!container) return;
+  try {
+    const spTok = await getSpToken();
+    const r = await fetch(
+      `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/GetItemById(${id})/Comments`,
+      {headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=nometadata'}}
+    );
+    if (!r.ok) { container.innerHTML='<span style="font-size:11px;color:var(--text-muted);">Kommentare nicht verfügbar</span>'; return; }
+    const j = await r.json();
+    const comments = j.value||[];
+    const addBox = $id('comment-add-'+id);
+    container.innerHTML = '';
+    if (!comments.length) {
+      container.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:4px 0;">Noch keine Kommentare.</div>';
+    } else {
+      comments.forEach(c=>{
+        const author = c.author?.name || c.author?.email || 'Unbekannt';
+        const date   = c.createdDate ? fmtFull(c.createdDate) : '';
+        const div = document.createElement('div');
+        div.style.cssText='border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px;background:var(--bg);font-size:12px;';
+        div.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-weight:600;color:var(--navy);">${esc(author)}</span>
+          <span style="font-size:10px;color:var(--text-muted);">${esc(date)}</span>
+        </div><div style="line-height:1.6;word-break:break-word;">${esc(c.text||'')}</div>`;
+        container.appendChild(div);
+      });
+    }
+    if (addBox) addBox.style.display='';
+  } catch(e) {
+    if (container) container.innerHTML=`<span style="font-size:11px;color:var(--red);">${esc(e.message)}</span>`;
+  }
+}
+
+async function postTicketComment(id) {
+  const ta = $id('comment-input-'+id);
+  const text = (ta?.value||'').trim();
+  if (!text) return;
+  try {
+    const spTok = await getSpToken();
+    const r = await fetch(
+      `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/GetItemById(${id})/Comments`,
+      {method:'POST', headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=nometadata','Content-Type':'application/json'},
+       body:JSON.stringify({text})}
+    );
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    ta.value='';
+    toast('Kommentar gespeichert ✓','success');
+    fetchTicketComments(id);
+  } catch(e) { toast('Fehler: '+e.message,'error'); }
 }
 
 async function fetchTicketAttachments(id) {
@@ -1084,8 +1149,8 @@ function showTicketDetailPanel(id) {
   const cTitle    = getCol('title')||'Title';
   const cDesc     = getCol('desc');
   const cAssign   = getCol('assigned');
-  const stColors  = {Offen:'var(--blue)',Neu:'#6366f1','In Bearbeitung':'var(--yellow)','Warten auf Rückmeldung':'var(--orange)',Erledigt:'var(--green)',Abgebrochen:'#6b7280'};
-  const statuses  = ['Offen','Neu','In Bearbeitung','Warten auf Rückmeldung','Erledigt','Abgebrochen'];
+  const stColors = STATUS_COLORS;
+  const statuses = TICKET_STATUSES;
   const skipKeys  = new Set(['_UIVersionString','ContentType','Attachments','ID','AuthorLookupId','EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount','ComplianceAssetId','@odata.etag']);
   const stColor   = stColors[curStatus]||'#666';
   const titleText = esc(f[cTitle]||f.Title||'');
@@ -1298,8 +1363,8 @@ function openTicketFullscreen(id) {
   const f = it.fields||{};
   const colStatus = col(['Status'])||'Status';
   const curStatus = f[colStatus]||f.Status||'Offen';
-  const statuses  = ['Offen','Neu','In Bearbeitung','Warten auf Rückmeldung','Erledigt','Abgebrochen'];
-  const stColors  = {Offen:'var(--blue)',Neu:'#6366f1','In Bearbeitung':'var(--yellow)','Warten auf Rückmeldung':'var(--orange)',Erledigt:'var(--green)',Abgebrochen:'#6b7280'};
+  const statuses = TICKET_STATUSES;
+  const stColors = STATUS_COLORS;
 
   $id('fs-title').textContent = `Ticket #${id}`;
   $id('fs-status-badge').innerHTML = `<span class="fs-status-current" style="background:${stColors[curStatus]||'#666'}22;color:${stColors[curStatus]||'#666'};">${esc(curStatus)}</span>`;
@@ -1570,9 +1635,13 @@ async function saveTicket() {
 // ════════════════════════════════════════════════════════════════
 const STATUS_COLORS = {
   'Offen':'var(--blue)','Neu':'#6366f1',
-  'In Bearbeitung':'var(--yellow)','Erledigt':'var(--green)',
-  'Abgebrochen':'#6b7280'
+  'In Bearbeitung':'var(--yellow)',
+  'Warten auf Rückmeldung':'var(--orange)',
+  'Erledigt':'var(--green)',
+  'Abgebrochen':'#6b7280',
+  'Projekt':'#7c3aed'
 };
+const TICKET_STATUSES = Object.keys(STATUS_COLORS);
 const PRIO_COLORS = {
   'Niedrig':'#94a3b8','Normal':'var(--blue)','Mittel':'var(--yellow)',
   'Hoch':'var(--orange)','high':'var(--orange)','Kritisch':'var(--red)'
@@ -1731,16 +1800,18 @@ function buildReports() {
     </div>`;
   }
 
-  // Top-10 Zugewiesen an — scan all known column names
-  const _asgnColCandidates = ['Zugewiesen','AssignedTo','Zugewiesen_x0020_an','Bearbeiter'];
-  const _asgnKey = getCol('assigned') || _asgnColCandidates.find(k=>
-    allTickets.some(t=>(t.fields||{})[k]!=null)
+  // Top-10 Zugewiesen an — scan all known column names incl. discovered
+  const _asgnColCandidates = ['Zugewiesen','AssignedTo','Zugewiesen_x0020_an','Bearbeiter','ZugewiesenAn','Assigned_x0020_To'];
+  const _asgnKey = getCol('assigned') || _discoveredCols.asgn || _asgnColCandidates.find(k=>
+    allTickets.some(t=>(t.fields||{})[k]!=null && (t.fields||{})[k]!=='')
   );
   {
     const asgnData = countBy(allTickets, t=>{
-      const f=t.fields||{};
-      const v = _asgnKey ? f[_asgnKey] : null;
-      return personName(v)||'(Nicht zugewiesen)';
+      const f = t.fields||{};
+      const v = _asgnKey ? f[_asgnKey]
+        : (_asgnColCandidates.reduce((acc,k)=>acc||f[k]||null, null));
+      const name = personName(v);
+      return name || '(Nicht zugewiesen)';
     });
     const top10named = asgnData.filter(([l])=>l!=='(Nicht zugewiesen)').slice(0,10);
     const top10 = top10named.length ? top10named : asgnData.slice(0,10);
