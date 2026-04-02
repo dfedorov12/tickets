@@ -38,12 +38,20 @@ const READONLY_FIELDS = new Set([
   'ItemChildCount','FolderChildCount','ComplianceAssetId',
   'OData__ColorTag','@odata.etag'
 ]);
+// Fields to hide in ticket detail views (superset of READONLY_FIELDS)
+const DISPLAY_SKIP_KEYS = new Set([
+  ...READONLY_FIELDS,
+  'AppEditorLookupId','Modified','Created','@odata.etag','id',
+  'OData__ColorTag','ComplianceAssetId','LinkTitleNoMenu','LinkTitle',
+  'ItemChildCount','FolderChildCount'
+]);
 function stripReadOnly(fields) {
   const clean = {};
   Object.entries(fields).forEach(([k,v]) => {
-    if (!READONLY_FIELDS.has(k) && !k.startsWith('@odata') && !k.startsWith('_') && v !== undefined) {
-      clean[k] = v;
-    }
+    if (READONLY_FIELDS.has(k) || k.startsWith('@odata') || k.startsWith('_') || v === undefined) return;
+    // Skip LookupId fields whose base column does not exist in this SP list
+    if (k.endsWith('LookupId') && !ticketCols[k.replace(/LookupId$/, '')]) return;
+    clean[k] = v;
   });
   return clean;
 }
@@ -864,12 +872,7 @@ function openTicketDetail(id) {
     </div>`;
   }
   // Fields to hide completely
-  const skip = new Set([
-    '_UIVersionString','ContentType','Attachments','Modified','Created','Author','Editor','ID',
-    'AuthorLookupId','EditorLookupId','AppAuthorLookupId',
-    'LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount',
-    '@odata.etag','id','OData__ColorTag','ComplianceAssetId'
-  ]);
+  const skip = new Set(DISPLAY_SKIP_KEYS);
   if (assignedCol) skip.add(assignedCol); // already shown above as editable field
   html += `<div class="section-title" style="margin-top:12px;">Details</div>`;
   // Detect description and person columns
@@ -1151,7 +1154,7 @@ function showTicketDetailPanel(id) {
   const cAssign   = getCol('assigned');
   const stColors = STATUS_COLORS;
   const statuses = TICKET_STATUSES;
-  const skipKeys  = new Set(['_UIVersionString','ContentType','Attachments','ID','AuthorLookupId','EditorLookupId','AppAuthorLookupId','LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount','ComplianceAssetId','@odata.etag']);
+  const skipKeys  = new Set(DISPLAY_SKIP_KEYS);
   const stColor   = stColors[curStatus]||'#666';
   const titleText = esc(f[cTitle]||f.Title||'');
 
@@ -1260,9 +1263,12 @@ async function saveDetailTab(id) {
     const cTitle=getCol('title')||'Title';
     if(_openTabs[id]&&fields[cTitle]){ _openTabs[id].title=String(fields[cTitle]).substring(0,30); renderTabBar(); }
     toast('Gespeichert ✓','success');
+    saveTicketCache();
+    const wrap2 = $id('tkt-table-wrap');
+    const st2 = wrap2 ? wrap2.scrollTop : 0;
     const list=filterActive()?applyFilters(allTickets):allTickets.slice(0,displayedCount);
     renderTickets(list);
-    saveTicketCache();
+    if (wrap2) wrap2.scrollTop = st2;
   } catch(e){ toast('Fehler: '+e.message,'error'); }
 }
 
@@ -1377,12 +1383,7 @@ function openTicketFullscreen(id) {
     </select>`;
 
   // Skip fields
-  const skip = new Set([
-    '_UIVersionString','ContentType','Attachments','Modified','Created','Author','Editor','ID',
-    'AuthorLookupId','EditorLookupId','AppAuthorLookupId',
-    'LinkTitleNoMenu','LinkTitle','ItemChildCount','FolderChildCount',
-    '@odata.etag','id','OData__ColorTag','ComplianceAssetId'
-  ]);
+  const skip = new Set(DISPLAY_SKIP_KEYS);
   const descCol = getCol('desc');
   const assignedCol = getCol('assigned');
   const authorCol = col(['Author0','Ticket_x0020_erstellt_x0020_von','TicketErstelltVon','ErstelltVon']);
@@ -1520,16 +1521,15 @@ async function fetchTicketAttachmentsFs(id) {
 async function changeStatus(id, newStatus) {
   if (!ticketSiteId||!ticketListId||!newStatus) return;
   const colStatus=col(['Status'])||'Status';
-  const stColors={Offen:'var(--blue)',Neu:'#6366f1','In Bearbeitung':'var(--yellow)','Warten auf Rückmeldung':'var(--orange)',Erledigt:'var(--green)',Abgebrochen:'#6b7280'};
   try {
     await gPatch(`/sites/${ticketSiteId}/lists/${ticketListId}/items/${id}/fields`, {[colStatus]:newStatus});
     const it = allTickets.find(t=>t.id==id);
     if(it) { it.fields = it.fields||{}; it.fields[colStatus]=newStatus; }
     // Update badge live
     const badge = document.getElementById('sb-status-badge-'+id);
-    if(badge){ badge.textContent=newStatus; badge.style.background=(stColors[newStatus]||'#666')+'22'; badge.style.color=stColors[newStatus]||'#666'; }
+    if(badge){ badge.textContent=newStatus; badge.style.background=(STATUS_COLORS[newStatus]||'#666')+'22'; badge.style.color=STATUS_COLORS[newStatus]||'#666'; }
     const dtBadge = document.getElementById('dt-status-badge-'+id);
-    if(dtBadge){ dtBadge.textContent=newStatus; dtBadge.style.background=(stColors[newStatus]||'#666')+'22'; dtBadge.style.color=stColors[newStatus]||'#666'; }
+    if(dtBadge){ dtBadge.textContent=newStatus; dtBadge.style.background=(STATUS_COLORS[newStatus]||'#666')+'22'; dtBadge.style.color=STATUS_COLORS[newStatus]||'#666'; }
     toast(`Status → ${newStatus}`,'success');
     const list = filterActive() ? applyFilters(allTickets) : allTickets.slice(0,displayedCount);
     renderTickets(list);
@@ -1548,8 +1548,12 @@ async function saveSidebar(id) {
     const it=allTickets.find(t=>t.id==id);
     if(it) Object.assign(it.fields, fields);
     toast('Gespeichert ✓','success');
+    saveTicketCache();
+    const wrap = $id('tkt-table-wrap');
+    const scrollTop = wrap ? wrap.scrollTop : 0;
     const list = filterActive() ? applyFilters(allTickets) : allTickets.slice(0,displayedCount);
     renderTickets(list);
+    if (wrap) wrap.scrollTop = scrollTop;
   } catch(e){ toast('Fehler: '+e.message,'error'); }
 }
 
