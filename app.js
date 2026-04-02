@@ -49,8 +49,12 @@ function stripReadOnly(fields) {
   const clean = {};
   Object.entries(fields).forEach(([k,v]) => {
     if (READONLY_FIELDS.has(k) || k.startsWith('@odata') || k.startsWith('_') || v === undefined) return;
-    // Skip LookupId fields whose base column does not exist in this SP list
-    if (k.endsWith('LookupId') && !ticketCols[k.replace(/LookupId$/, '')]) return;
+    if (k.endsWith('LookupId')) {
+      if (!ticketCols[k.replace(/LookupId$/, '')]) return; // unknown field — skip
+      const intVal = parseInt(v, 10);
+      if (!isNaN(intVal)) clean[k] = intVal;              // SP requires integer
+      return;
+    }
     clean[k] = v;
   });
   return clean;
@@ -1086,7 +1090,7 @@ async function postTicketComment(id, inputId) {
     const body = mentions.length ? {text, mentions} : {text};
     const r = await fetch(
       `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/GetItemById(${id})/Comments`,
-      {method:'POST', headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=nometadata','Content-Type':'application/json'},
+      {method:'POST', headers:{Authorization:'Bearer '+spTok, Accept:'application/json;odata=verbose','Content-Type':'application/json;odata=verbose'},
        body:JSON.stringify(body)}
     );
     if (!r.ok) throw new Error('HTTP '+r.status);
