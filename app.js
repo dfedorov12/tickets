@@ -1117,23 +1117,41 @@ async function sendMentionNotifications(mentions, ticketId, commentText) {
   const ticketTitle = ticket?.fields?.[titleCol] || '';
   const senderName = account?.name || 'Ticketsystem';
   const ticketUrl = 'https://dfedorov12.github.io/tickets/';
+  // Acquire Mail.Send token explicitly — triggers consent popup if not yet granted
+  let mailTok;
+  try {
+    mailTok = (await msalApp.acquireTokenSilent({scopes:['Mail.Send'], account})).accessToken;
+  } catch {
+    try {
+      mailTok = (await msalApp.acquireTokenPopup({scopes:['Mail.Send'], account})).accessToken;
+    } catch(e) {
+      dbg('Mail.Send Zustimmung fehlt:', e.message);
+      toast('E-Mail-Benachrichtigung: Bitte Mail.Send-Berechtigung erteilen','info');
+      return;
+    }
+  }
   for (const m of mentions) {
     if (!m.mail) continue;
     try {
-      await gPost('/me/sendMail', {
-        message: {
-          subject: `${senderName} hat Sie in Ticket #${ticketId} erwähnt`,
-          body: {
-            contentType: 'HTML',
-            content: `<p><strong>${esc(senderName)}</strong> hat Sie in einem Kommentar erwähnt:</p>
+      const r = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer '+mailTok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: {
+            subject: `${senderName} hat Sie in Ticket #${ticketId} erwähnt`,
+            body: {
+              contentType: 'HTML',
+              content: `<p><strong>${esc(senderName)}</strong> hat Sie in einem Kommentar erwähnt:</p>
 <blockquote style="border-left:3px solid #0078d4;padding:8px 12px;background:#f0f8ff;margin:12px 0;">${esc(commentText)}</blockquote>
 <p><strong>Ticket:</strong> #${ticketId}${ticketTitle ? ' – '+esc(ticketTitle) : ''}</p>
 <p><a href="${ticketUrl}" style="color:#0078d4;">Ticket öffnen →</a></p>`
+            },
+            toRecipients: [{ emailAddress: { address: m.mail, name: m.name } }]
           },
-          toRecipients: [{ emailAddress: { address: m.mail, name: m.name } }]
-        },
-        saveToSentItems: false
+          saveToSentItems: false
+        })
       });
+      if (!r.ok) throw new Error('HTTP '+r.status+': '+await r.text().catch(()=>''));
       dbg(`Mention-E-Mail → ${m.mail} ✓`);
     } catch(e) {
       dbg(`Mention-E-Mail Fehler (${m.mail}):`, e.message);
