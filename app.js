@@ -904,7 +904,7 @@ function openTicketDetail(id) {
       const taId = 'ta_'+k.replace(/[^a-z0-9]/gi,'_');
       const pvId = 'pv_'+k.replace(/[^a-z0-9]/gi,'_');
       html+=`<div class="field-row"><label>${esc(label)}</label>
-        <div id="${pvId}" class="desc-box" style="padding:10px 12px;border:1.5px solid var(--border2);border-radius:6px;font-size:12px;line-height:1.7;background:var(--bg);min-height:40px;word-break:break-word;cursor:pointer;" title="Klicken zum Bearbeiten" onclick="this.style.display='none';document.getElementById('${taId}').style.display='';document.getElementById('${taId}').focus();">${rendered}<br><span style="font-size:10px;color:var(--blue);display:block;margin-top:4px;">✏️ Klicken zum Bearbeiten</span></div>
+        <div id="${pvId}" class="desc-box" style="padding:10px 12px;border:1.5px solid var(--border2);border-radius:6px;font-size:12px;line-height:1.7;background:var(--bg);min-height:40px;word-break:break-word;cursor:pointer;" title="Klicken zum Bearbeiten" onclick="if(!event.target.closest('a')){this.style.display='none';document.getElementById('${taId}').style.display='';document.getElementById('${taId}').focus();}">${rendered}<br><span style="font-size:10px;color:var(--blue);display:block;margin-top:4px;">✏️ Klicken zum Bearbeiten</span></div>
         <textarea id="${taId}" data-fk="${esc(k)}" style="font-size:12px;margin-top:0;display:none;width:100%;min-height:120px;padding:8px 11px;border:1.5px solid var(--navy);border-radius:6px;font-family:inherit;outline:none;" rows="6" onblur="if(!this.value.trim()){document.getElementById('${pvId}').style.display='';this.style.display='none';}">${esc(String(v||''))}</textarea>
       </div>`;
       return;
@@ -1364,7 +1364,7 @@ function showTicketDetailPanel(id) {
       const taId2='ta2_'+k.replace(/[^a-z0-9]/gi,'_');
       const pvId2='pv2_'+k.replace(/[^a-z0-9]/gi,'_');
       fieldsHtml+=`<div class="field-row" style="grid-column:1/-1"><label>${esc(label)}</label>
-        <div id="${pvId2}" class="desc-box" style="padding:10px 12px;border:1.5px solid var(--border2);border-radius:6px;font-size:13px;line-height:1.7;background:var(--bg);cursor:pointer;" title="Klicken zum Bearbeiten" onclick="this.style.display='none';document.getElementById('${taId2}').style.display='';document.getElementById('${taId2}').focus();">${cleanHtml(v)}<br><span style="font-size:10px;color:var(--blue);display:block;margin-top:4px;">✏️ Klicken zum Bearbeiten</span></div>
+        <div id="${pvId2}" class="desc-box" style="padding:10px 12px;border:1.5px solid var(--border2);border-radius:6px;font-size:13px;line-height:1.7;background:var(--bg);cursor:pointer;" title="Klicken zum Bearbeiten" onclick="if(!event.target.closest('a')){this.style.display='none';document.getElementById('${taId2}').style.display='';document.getElementById('${taId2}').focus();}">${cleanHtml(v)}<br><span style="font-size:10px;color:var(--blue);display:block;margin-top:4px;">✏️ Klicken zum Bearbeiten</span></div>
         <textarea id="${taId2}" data-fk="${esc(k)}" style="display:none;font-size:12px;margin-top:0;width:100%;min-height:120px;padding:8px 11px;border:1.5px solid var(--navy);border-radius:6px;font-family:inherit;outline:none;" rows="6" onblur="if(!this.value.trim()){document.getElementById('${pvId2}').style.display='';this.style.display='none';}">${esc(String(v||''))}</textarea>
         </div>`;
     } else if(isAssign){
@@ -1629,7 +1629,7 @@ function openTicketFullscreen(id) {
       const taId3='ta3_'+k.replace(/[^a-z0-9]/gi,'_');
       const pvId3='pv3_'+k.replace(/[^a-z0-9]/gi,'_');
       html+=`<div class="fs-field fs-body-full"><div class="fs-field-label">${esc(label)}</div>
-        <div id="${pvId3}" class="fs-desc-box" style="cursor:pointer;" title="Klicken zum Bearbeiten" onclick="this.style.display='none';document.getElementById('${taId3}').style.display='';document.getElementById('${taId3}').focus();">${rendered}<br><span style="font-size:10px;color:var(--blue);display:block;margin-top:4px;">✏️ Klicken zum Bearbeiten</span></div>
+        <div id="${pvId3}" class="fs-desc-box" style="cursor:pointer;" title="Klicken zum Bearbeiten" onclick="if(!event.target.closest('a')){this.style.display='none';document.getElementById('${taId3}').style.display='';document.getElementById('${taId3}').focus();}">${rendered}<br><span style="font-size:10px;color:var(--blue);display:block;margin-top:4px;">✏️ Klicken zum Bearbeiten</span></div>
         <textarea id="${taId3}" data-fk="${esc(k)}" style="font-size:12px;margin-top:0;display:none;width:100%;min-height:120px;padding:8px;border:1.5px solid var(--navy);border-radius:6px;font-family:inherit;outline:none;" rows="6" onblur="if(!this.value.trim()){document.getElementById('${pvId3}').style.display='';this.style.display='none';}">${esc(String(v||''))}</textarea>
       </div>`;
       return;
