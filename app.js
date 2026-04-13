@@ -1125,26 +1125,15 @@ async function sendMentionNotifications(mentions, ticketId, commentText) {
   const senderName = account?.name || 'Ticketsystem';
   const ticketUrl = 'https://dfedorov12.github.io/tickets/';
 
-  // Acquire a fresh token that explicitly includes Mail.Send.
-  // acquireTokenSilent with new scopes forces MSAL to mint a fresh token including consent.
+  // Use the same Graph token as the rest of the app (SCOPES already includes Mail.Send).
+  // This avoids separate consent dialogs — Mail.Send was already granted at login.
   let mailTok;
   try {
-    mailTok = (await msalApp.acquireTokenSilent({
-      scopes: ['User.Read', 'Mail.Send'],
-      account,
-      forceRefresh: true   // bypass cache — ensures Mail.Send consent is reflected
-    })).accessToken;
-  } catch {
-    try {
-      mailTok = (await msalApp.acquireTokenPopup({
-        scopes: ['User.Read', 'Mail.Send'],
-        account
-      })).accessToken;
-    } catch(e) {
-      toast('E-Mail konnte nicht gesendet werden: ' + (e.message||'Zustimmung fehlt'), 'error');
-      dbg('Mail.Send Token fehlgeschlagen:', e.message);
-      return;
-    }
+    mailTok = await getToken();
+  } catch(e) {
+    toast('E-Mail: Token-Fehler – ' + (e.message||'Anmeldung erforderlich'), 'error');
+    dbg('Mail.Send getToken fehlgeschlagen:', e);
+    return;
   }
 
   let sent = 0;
