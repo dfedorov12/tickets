@@ -934,11 +934,18 @@ function openTicketDetail(id) {
 
     // Choice fields → dropdown select
     if (ticketChoices[k]) {
-      const curVal = String(v||'');
+      let curVal = String(v||'');
+      // Normalize priority variants (e.g. "Mittel"→"Normal", "high"→"Hoch") so the
+      // select pre-selects correctly even when SP stores legacy or English values
+      const choices = ticketChoices[k];
+      if (!choices.includes(curVal)) {
+        const norm = normPrio(curVal);
+        if (choices.includes(norm)) curVal = norm;
+      }
       html+=`<div class="field-row"><label>${esc(label)}</label>
         <select data-fk="${esc(k)}" style="padding:7px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;font-size:12px;">
           <option value="">— wählen —</option>
-          ${ticketChoices[k].map(c=>`<option value="${esc(c)}"${c===curVal?' selected':''}>${esc(c)}</option>`).join('')}
+          ${choices.map(c=>`<option value="${esc(c)}"${c===curVal?' selected':''}>${esc(c)}</option>`).join('')}
         </select></div>`;
       return;
     }
@@ -1492,7 +1499,11 @@ function openTicketNewTab(id) {
     else if(Array.isArray(v)||typeof v==='string'&&v.startsWith('[')) display=`<div style="font-size:13px;">${esc(personName(v))}</div>`;
     else if(typeof v==='string'&&/^\d{4}-\d{2}-\d{2}T/.test(v)) display=`<div style="font-size:13px;">${fmtFull(v)}</div>`;
     else if(typeof v==='object') display=`<div style="font-size:13px;">${esc(v?.LookupValue||v?.displayName||v?.Title||v?.Email||JSON.stringify(v))}</div>`;
-    else display=`<div style="font-size:13px;">${esc(String(v))}</div>`;
+    else {
+      // Normalize priority field so "Mittel"→"Normal", "high"→"Hoch" etc.
+      const strVal = k===cPrio ? normPrio(String(v)) : String(v);
+      display=`<div style="font-size:13px;">${esc(strVal)}</div>`;
+    }
     fieldsHtml+=`<div style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;color:#6b7a8f;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">${esc(label)}</div>${display}</div>`;
   });
 
