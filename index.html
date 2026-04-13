@@ -34,7 +34,6 @@
       <button class="hdr-tab on" id="tab-tickets" onclick="showPanel('tickets')">🎫 Tickets</button>
       <button class="hdr-tab"    id="tab-reports" onclick="showPanel('reports')">📊 Reports</button>
       <button class="hdr-tab"    id="tab-devices" onclick="showPanel('devices')">💻 Azure-Geräte</button>
-      <button class="hdr-tab"    id="tab-dms"     onclick="showPanel('dms')">📄 DMS</button>
       <button class="hdr-tab"    id="tab-perms"   onclick="showPanel('perms')">🔒 Berechtigungen</button>
       <button class="hdr-tab"    id="tab-auto"    onclick="showPanel('auto')">⚡ Automatismen</button>
     </nav>
@@ -194,10 +193,6 @@
       </div>
     </div>
 
-    <!-- DMS PANEL -->
-    <div class="panel" id="panel-dms" style="overflow:hidden;">
-      <iframe id="dms-iframe" src="https://dfedorov12.github.io/dms/" style="width:100%;height:100%;border:none;" allow="clipboard-write" onload="dmsEnhanceIframe()"></iframe>
-    </div>
 
     <!-- PERMISSIONS PANEL -->
     <div class="panel" id="panel-perms" style="overflow:auto;">

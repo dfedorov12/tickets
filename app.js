@@ -320,7 +320,7 @@ function clearDebug() {
 // PANEL SWITCHING
 // ════════════════════════════════════════════════════════════════
 function showPanel(id) {
-  ['tickets','reports','devices','dms','perms','auto','ticket-detail'].forEach(p => {
+  ['tickets','reports','devices','perms','auto','ticket-detail'].forEach(p => {
     const panel = $id('panel-'+p);
     const tab   = $id('tab-'+p);
     if(panel) panel.classList.toggle('active', p===id);
@@ -1007,20 +1007,25 @@ function renderCommentText(text, mentions) {
   if (!text) return '';
   let html = esc(text);
   if (mentions && mentions.length) {
-    // Replace each mentionText with a blue styled span (exact match, case-sensitive)
+    // SP returns mentions[].mentioned.user.loginName = "i:0#.f|membership|email@domain.com"
     mentions.forEach(m => {
       if (!m.mentionText) return;
       const safe = esc(m.mentionText);
+      const loginName = m.mentioned?.user?.loginName || '';
+      const email = loginName.includes('|') ? loginName.split('|').pop()
+                  : (m.mentioned?.user?.email || '');
+      const href = email ? `mailto:${email}` : `#`;
       html = html.split(safe).join(
-        `<span style="color:#0078d4;font-weight:600;background:rgba(0,120,212,.08);border-radius:3px;padding:0 2px;">${safe}</span>`
+        `<a href="${esc(href)}" style="color:#0078d4;font-weight:600;text-decoration:none;background:rgba(0,120,212,.08);border-radius:3px;padding:0 2px;" title="${esc(email)}">${safe}</a>`
       );
     });
   } else {
-    // Fallback: highlight @Firstname Lastname patterns (capitalised, up to 40 chars)
-    html = html.replace(/@([A-ZÄÖÜ][^@<\n]{1,39}?)(?=[\s,.:!?]|$)/g,
-      '<span style="color:#0078d4;font-weight:600;background:rgba(0,120,212,.08);border-radius:3px;padding:0 2px;">@$1</span>');
+    // Fallback for comments posted as plain text (no SP mentions metadata):
+    // match @Word patterns — covers names like @Denis Fedorov
+    html = html.replace(/@([\w][\w.\u00C0-\u017E -]{0,39})/g,
+      '<a href="#" style="color:#0078d4;font-weight:600;text-decoration:none;background:rgba(0,120,212,.08);border-radius:3px;padding:0 2px;">@$1</a>');
   }
-  // Auto-link plain URLs
+  // Auto-link URLs
   html = html.replace(/(https?:\/\/[^\s<"'&]+)/g,
     '<a href="$1" target="_blank" style="color:var(--blue);word-break:break-all;">$1</a>');
   return html.replace(/\n/g, '<br>');
@@ -3555,27 +3560,6 @@ function dmsFormatBytesPerm(b){
   return (b/1024/1024).toFixed(1)+'MB';
 }
 
-// ════════════════════════════════════════════════════════════════
-// DMS — Upload-Enhancement
-// ════════════════════════════════════════════════════════════════
-function dmsEnhanceIframe() {
-  // Das DMS läuft auf dfedorov12.github.io — cross-origin.
-  // Same-origin DOM-Zugriff funktioniert nur wenn DMS auf gleicher Domain deployt ist.
-  try {
-    const iframe = document.getElementById('dms-iframe');
-    if (!iframe) return;
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) { dbg('DMS: cross-origin – Multi-Upload muss im DMS-Quellcode aktiviert werden (input[type=file multiple webkitdirectory])'); return; }
-    doc.querySelectorAll('input[type="file"]').forEach(inp => {
-      inp.multiple = true;
-      inp.setAttribute('webkitdirectory', '');
-      dbg('DMS: file-input patched ✓', inp.id||'');
-    });
-    dbg('DMS iframe enhanced ✓ (same-origin)');
-  } catch(e) {
-    dbg('DMS enhance fehlgeschlagen (cross-origin):', e.message);
-  }
-}
 
 // ════════════════════════════════════════════════════════════════
 // BOOT
