@@ -1007,13 +1007,13 @@ function renderCommentText(text, mentions) {
   if (!text) return '';
   let html = esc(text);
   if (mentions && mentions.length) {
-    // SP returns mentions[].mentioned.user.loginName = "i:0#.f|membership|email@domain.com"
+    // SP GET response: mentions[].mentionText = "@Name", mentions[].mentioned.loginName flat
     mentions.forEach(m => {
       if (!m.mentionText) return;
       const safe = esc(m.mentionText);
-      const loginName = m.mentioned?.user?.loginName || '';
+      const loginName = m.mentioned?.loginName || '';
       const email = loginName.includes('|') ? loginName.split('|').pop()
-                  : (m.mentioned?.user?.email || '');
+                  : (m.mentioned?.email || '');
       const href = email ? `mailto:${email}` : `#`;
       html = html.split(safe).join(
         `<a href="${esc(href)}" style="color:#0078d4;font-weight:600;text-decoration:none;background:rgba(0,120,212,.08);border-radius:3px;padding:0 2px;" title="${esc(email)}">${safe}</a>`
@@ -1166,9 +1166,8 @@ async function postTicketComment(id, inputId) {
   const text = (ta?.value||'').trim();
   if (!text) return;
   const mentions = (_commentMentions[taId]||[]).map((m,i)=>({
-    id:i, mentionText:'@'+m.name,
-    // email field added — required by SP mention format
-    mentioned:{user:{name:m.name, email:m.mail, loginName:'i:0#.f|membership|'+m.mail}}
+    id:i,
+    mentioned:{name:m.name, email:m.mail, loginName:'i:0#.f|membership|'+m.mail}
   }));
   try {
     const spTok = await getSpToken();
