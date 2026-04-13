@@ -637,37 +637,37 @@ async function refreshNewTickets() {
   const btn = $id('btn-refresh');
   if (btn) { btn.disabled=true; btn.textContent='⏳'; }
   try {
-    const existingIds = new Set(allTickets.map(t=>t.id));
-    // Use the newest known ticket's date as baseline — only fetch items created after that
-    const newestDate = allTickets[0]?.createdDateTime || new Date(Date.now()-3600000).toISOString();
-    let url1 = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$filter=fields/Created gt '${newestDate}'&$top=100`;
-    let incoming = [];
-    let nUrl = url1;
-    let pages = 0;
-    while (nUrl && pages < 10) {
-      const d = await gGet(nUrl, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
-      incoming = [...incoming, ...(d.value||[])];
-      nUrl = d['@odata.nextLink'] ? d['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
-      pages++;
-    }
-    const freshNew = incoming.filter(t=>!existingIds.has(t.id));
-    dbg('Smart Refresh: incoming='+incoming.length+' new='+freshNew.length);
+    // Fetch the 100 most recently modified tickets — covers both new and updated tickets
+    const url = `/sites/${ticketSiteId}/lists/${ticketListId}/items?$expand=fields&$orderby=fields/Modified desc&$top=100`;
+    const d = await gGet(url, {'Prefer':'HonorNonIndexedQueriesWarningMayFailRandomly'});
+    const fresh = d.value || [];
+    dbg('Refresh: empfangen='+fresh.length);
 
-    if (freshNew.length) {
-      allTickets = [...freshNew, ...allTickets];
-      sortByCreatedDesc(allTickets);
-      buildFilterOptions(allTickets);
-      const list = filterActive() ? applyFilters(allTickets) : allTickets.slice(0,displayedCount);
-      renderTickets(list);
-      renderLoadMore();
-      $id('tkt-count').textContent = allTickets.length+' Tickets';
-      saveTicketCache();
-      toast(`✓ ${freshNew.length} neue${freshNew.length===1?'s':''} Ticket(s)`, 'success');
-    } else {
-      toast('Keine neuen Tickets', 'info');
-    }
+    let newCount = 0, updCount = 0;
+    fresh.forEach(t => {
+      const idx = allTickets.findIndex(x => x.id === t.id);
+      if (idx >= 0) {
+        allTickets[idx] = t; // update existing ticket with latest properties
+        updCount++;
+      } else {
+        allTickets.unshift(t); // new ticket
+        newCount++;
+      }
+    });
+
+    sortByCreatedDesc(allTickets);
+    buildFilterOptions(allTickets);
+    const list = filterActive() ? applyFilters(allTickets) : allTickets.slice(0, displayedCount);
+    renderTickets(list);
+    renderLoadMore();
+    $id('tkt-count').textContent = allTickets.length + ' Tickets';
+    saveTicketCache();
+    const msg = newCount > 0
+      ? `✓ ${updCount} aktualisiert, ${newCount} neu`
+      : `✓ ${updCount} Tickets aktualisiert`;
+    toast(msg, 'success');
   } catch(e) {
-    dbg('Smart Refresh Fehler', e.message);
+    dbg('Refresh Fehler', e.message);
     toast('Refresh-Fehler: '+e.message, 'error');
   } finally {
     if(btn){ btn.disabled=false; btn.textContent='🔄'; }
@@ -1003,6 +1003,29 @@ function openTicketDetail(id) {
   fetchTicketAttachments(id);
 }
 
+function renderCommentText(text, mentions) {
+  if (!text) return '';
+  let html = esc(text);
+  if (mentions && mentions.length) {
+    // Replace each mentionText with a blue styled span (exact match, case-sensitive)
+    mentions.forEach(m => {
+      if (!m.mentionText) return;
+      const safe = esc(m.mentionText);
+      html = html.split(safe).join(
+        `<span style="color:#0078d4;font-weight:600;background:rgba(0,120,212,.08);border-radius:3px;padding:0 2px;">${safe}</span>`
+      );
+    });
+  } else {
+    // Fallback: highlight @Firstname Lastname patterns (capitalised, up to 40 chars)
+    html = html.replace(/@([A-ZÄÖÜ][^@<\n]{1,39}?)(?=[\s,.:!?]|$)/g,
+      '<span style="color:#0078d4;font-weight:600;background:rgba(0,120,212,.08);border-radius:3px;padding:0 2px;">@$1</span>');
+  }
+  // Auto-link plain URLs
+  html = html.replace(/(https?:\/\/[^\s<"'&]+)/g,
+    '<a href="$1" target="_blank" style="color:var(--blue);word-break:break-all;">$1</a>');
+  return html.replace(/\n/g, '<br>');
+}
+
 async function fetchTicketComments(id, containerId) {
   const container = $id(containerId||'comments-'+id);
   if (!container) return;
@@ -1028,7 +1051,7 @@ async function fetchTicketComments(id, containerId) {
         div.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:4px;">
           <span style="font-weight:600;color:var(--navy);">${esc(author)}</span>
           <span style="font-size:10px;color:var(--text-muted);">${esc(date)}</span>
-        </div><div style="line-height:1.6;word-break:break-word;">${esc(c.text||'')}</div>`;
+        </div><div style="line-height:1.6;word-break:break-word;">${renderCommentText(c.text, c.mentions)}</div>`;
         container.appendChild(div);
       });
     }
