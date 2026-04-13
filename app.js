@@ -1117,18 +1117,13 @@ async function sendMentionNotifications(mentions, ticketId, commentText) {
   const ticketTitle = ticket?.fields?.[titleCol] || '';
   const senderName = account?.name || 'Ticketsystem';
   const ticketUrl = 'https://dfedorov12.github.io/tickets/';
-  // Acquire Mail.Send token explicitly — triggers consent popup if not yet granted
+  // Use the main Graph token — SCOPES already includes Mail.Send from initial login
   let mailTok;
   try {
-    mailTok = (await msalApp.acquireTokenSilent({scopes:['Mail.Send'], account})).accessToken;
-  } catch {
-    try {
-      mailTok = (await msalApp.acquireTokenPopup({scopes:['Mail.Send'], account})).accessToken;
-    } catch(e) {
-      dbg('Mail.Send Zustimmung fehlt:', e.message);
-      toast('E-Mail-Benachrichtigung: Bitte Mail.Send-Berechtigung erteilen','info');
-      return;
-    }
+    mailTok = await getToken();
+  } catch(e) {
+    dbg('Token für E-Mail fehlgeschlagen:', e.message);
+    return;
   }
   for (const m of mentions) {
     if (!m.mail) continue;
