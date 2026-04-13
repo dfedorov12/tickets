@@ -1354,10 +1354,13 @@ function showTicketDetailPanel(id) {
           <input type="hidden" id="${fid}_id" data-fk="${esc(k)}LookupId"/>
         </div></div>`;
     } else if(ticketChoices[k]){
-      const curVal=String(v||'');
+      let curVal=String(v||'');
+      const ch=ticketChoices[k];
+      if(!ch.includes(curVal)){const n=normPrio(curVal);if(ch.includes(n))curVal=n;}
       fieldsHtml+=`<div class="field-row"><label>${esc(label)}</label>
         <select data-fk="${esc(k)}" style="padding:7px 10px;border:1.5px solid var(--border2);border-radius:6px;font-family:inherit;font-size:12px;">
-          ${ticketChoices[k].map(c=>`<option value="${esc(c)}"${c===curVal?' selected':''}>${esc(c)}</option>`).join('')}
+          <option value="">— wählen —</option>
+          ${ch.map(c=>`<option value="${esc(c)}"${c===curVal?' selected':''}>${esc(c)}</option>`).join('')}
         </select></div>`;
     } else if(typeof v==='string'&&/^\d{4}-\d{2}-\d{2}T/.test(v)){
       fieldsHtml+=`<div class="field-row"><label>${esc(label)}</label><input value="${fmtFull(v)}" style="font-size:12px;background:var(--bg);" readonly/></div>`;
@@ -1621,11 +1624,13 @@ function openTicketFullscreen(id) {
 
     // Choice fields → dropdown
     if (ticketChoices[k]) {
-      const curVal = String(v||'');
+      let curVal = String(v||'');
+      const ch2=ticketChoices[k];
+      if(!ch2.includes(curVal)){const n=normPrio(curVal);if(ch2.includes(n))curVal=n;}
       html+=`<div class="fs-field"><div class="fs-field-label">${esc(label)}</div>
         <select data-fk="${esc(k)}" style="width:100%;padding:6px 10px;border:1.5px solid var(--border2);border-radius:6px;font-size:13px;font-family:inherit;">
           <option value="">— wählen —</option>
-          ${ticketChoices[k].map(c=>`<option value="${esc(c)}"${c===curVal?' selected':''}>${esc(c)}</option>`).join('')}
+          ${ch2.map(c=>`<option value="${esc(c)}"${c===curVal?' selected':''}>${esc(c)}</option>`).join('')}
         </select></div>`;
       return;
     }
