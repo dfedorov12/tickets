@@ -1020,9 +1020,9 @@ function renderCommentText(text, mentions) {
       );
     });
   } else {
-    // Fallback for comments posted as plain text (no SP mentions metadata):
-    // match @Word patterns — covers names like @Denis Fedorov
-    html = html.replace(/@([\w][\w.\u00C0-\u017E -]{0,39})/g,
+    // Fallback for plain-text comments: match capitalised "Firstname Lastname" patterns.
+    // Each word must start with a capital letter → stops before normal sentence words.
+    html = html.replace(/@([A-ZÄÖÜ][a-zA-ZäöüÄÖÜß]+(?: [A-ZÄÖÜ][a-zA-ZäöüÄÖÜß]+)*)/g,
       '<a href="#" style="color:#0078d4;font-weight:600;text-decoration:none;background:rgba(0,120,212,.08);border-radius:3px;padding:0 2px;">@$1</a>');
   }
   // Auto-link URLs
