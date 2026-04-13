@@ -3,7 +3,7 @@
 // ════════════════════════════════════════════════════════════════
 const CLIENT_ID   = '75e627e8-2de0-4ec6-bec9-311757b89e08';
 const TENANT_ID   = 'fdb70646-023a-403b-a4b9-1f474a935123';
-const SCOPES      = ['User.Read','Sites.Read.All','Sites.ReadWrite.All','Files.ReadWrite.All'];
+const SCOPES      = ['User.Read','Sites.Read.All','Sites.ReadWrite.All','Files.ReadWrite.All','Mail.Send'];
 const TICKET_SITE = 'dihag.sharepoint.com:/sites/ticket';
 
 // ════════════════════════════════════════════════════════════════
@@ -1112,6 +1112,35 @@ function selectCommentMention(el, taId, ddId) {
   ta.focus();
 }
 
+async function sendMentionNotifications(mentions, ticketId, commentText) {
+  const ticket = allTickets.find(t => t.id == ticketId);
+  const ticketTitle = ticket?.fields?.[titleCol] || '';
+  const senderName = account?.name || 'Ticketsystem';
+  const ticketUrl = 'https://dfedorov12.github.io/tickets/';
+  for (const m of mentions) {
+    if (!m.mail) continue;
+    try {
+      await gPost('/me/sendMail', {
+        message: {
+          subject: `${senderName} hat Sie in Ticket #${ticketId} erwähnt`,
+          body: {
+            contentType: 'HTML',
+            content: `<p><strong>${esc(senderName)}</strong> hat Sie in einem Kommentar erwähnt:</p>
+<blockquote style="border-left:3px solid #0078d4;padding:8px 12px;background:#f0f8ff;margin:12px 0;">${esc(commentText)}</blockquote>
+<p><strong>Ticket:</strong> #${ticketId}${ticketTitle ? ' – '+esc(ticketTitle) : ''}</p>
+<p><a href="${ticketUrl}" style="color:#0078d4;">Ticket öffnen →</a></p>`
+          },
+          toRecipients: [{ emailAddress: { address: m.mail, name: m.name } }]
+        },
+        saveToSentItems: false
+      });
+      dbg(`Mention-E-Mail → ${m.mail} ✓`);
+    } catch(e) {
+      dbg(`Mention-E-Mail Fehler (${m.mail}):`, e.message);
+    }
+  }
+}
+
 async function postTicketComment(id, inputId) {
   const taId = inputId || 'comment-input-'+id;
   const ctnId = inputId && inputId.startsWith('dt-') ? 'dt-comments-'+id : 'comments-'+id;
@@ -1120,7 +1149,8 @@ async function postTicketComment(id, inputId) {
   if (!text) return;
   const mentions = (_commentMentions[taId]||[]).map((m,i)=>({
     id:i, mentionText:'@'+m.name,
-    mentioned:{user:{name:m.name, loginName:'i:0#.f|membership|'+m.mail}}
+    // email field added — required by SP mention format
+    mentioned:{user:{name:m.name, email:m.mail, loginName:'i:0#.f|membership|'+m.mail}}
   }));
   try {
     const spTok = await getSpToken();
@@ -1128,13 +1158,16 @@ async function postTicketComment(id, inputId) {
     const url = `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/GetItemById(${id})/Comments`;
     const headers = {Authorization:'Bearer '+spTok, Accept:'application/json;odata=nometadata','Content-Type':'application/json'};
     let r = await fetch(url, {method:'POST', headers, body:JSON.stringify(body)});
-    // If mentions caused 400, retry as plain text (SP may not support mention format)
     if (!r.ok && r.status===400 && mentions.length) {
+      const errDetail = await r.text().catch(()=>'');
+      dbg('SP mention 400:', errDetail);
       r = await fetch(url, {method:'POST', headers, body:JSON.stringify({text})});
     }
     if (!r.ok) throw new Error('HTTP '+r.status);
     ta.value='';
     delete _commentMentions[taId];
+    // Always send Graph email notification for mentions (independent of SP format)
+    if (mentions.length) sendMentionNotifications(mentions, id, text);
     toast('Kommentar gespeichert','success');
     fetchTicketComments(id, ctnId);
   } catch(e) { toast('Fehler: '+e.message,'error'); }
