@@ -1165,25 +1165,18 @@ async function postTicketComment(id, inputId) {
   const ta = $id(taId);
   const text = (ta?.value||'').trim();
   if (!text) return;
-  // Raw mention data: [{name, mail}] — kept separate from SP post body
+  // SP Comments API rejects all mention properties — post as plain text only.
+  // @mention notifications are delivered via Graph email instead.
   const rawMentions = _commentMentions[taId] || [];
-  // SP minimal format: only id + loginName (SP rejects mentionText and mentioned sub-object)
-  const spMentions = rawMentions.map((m,i)=>({id:i, loginName:'i:0#.f|membership|'+m.mail}));
   try {
     const spTok = await getSpToken();
     const url = `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/GetItemById(${id})/Comments`;
     const headers = {Authorization:'Bearer '+spTok, Accept:'application/json;odata=nometadata','Content-Type':'application/json'};
-    let body = spMentions.length ? {text, mentions:spMentions} : {text};
-    let r = await fetch(url, {method:'POST', headers, body:JSON.stringify(body)});
-    if (!r.ok && r.status===400 && spMentions.length) {
-      const errDetail = await r.text().catch(()=>'');
-      dbg('SP mention 400:', errDetail);
-      r = await fetch(url, {method:'POST', headers, body:JSON.stringify({text})});
-    }
+    const r = await fetch(url, {method:'POST', headers, body:JSON.stringify({text})});
     if (!r.ok) throw new Error('HTTP '+r.status);
     ta.value='';
     delete _commentMentions[taId];
-    // Send Graph email notification for mentions (rawMentions has .name and .mail)
+    // Send email notification for every @mention via Graph
     if (rawMentions.length) sendMentionNotifications(rawMentions, id, text);
     toast('Kommentar gespeichert','success');
     fetchTicketComments(id, ctnId);
