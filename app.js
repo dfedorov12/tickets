@@ -1124,16 +1124,32 @@ async function sendMentionNotifications(mentions, ticketId, commentText) {
   const ticketTitle = ticket?.fields?.[titleCol] || '';
   const senderName = account?.name || 'Ticketsystem';
   const ticketUrl = 'https://dfedorov12.github.io/tickets/';
-  // Use the main Graph token — SCOPES already includes Mail.Send from initial login
+
+  // Acquire a fresh token that explicitly includes Mail.Send.
+  // acquireTokenSilent with new scopes forces MSAL to mint a fresh token including consent.
   let mailTok;
   try {
-    mailTok = await getToken();
-  } catch(e) {
-    dbg('Token für E-Mail fehlgeschlagen:', e.message);
-    return;
+    mailTok = (await msalApp.acquireTokenSilent({
+      scopes: ['User.Read', 'Mail.Send'],
+      account,
+      forceRefresh: true   // bypass cache — ensures Mail.Send consent is reflected
+    })).accessToken;
+  } catch {
+    try {
+      mailTok = (await msalApp.acquireTokenPopup({
+        scopes: ['User.Read', 'Mail.Send'],
+        account
+      })).accessToken;
+    } catch(e) {
+      toast('E-Mail konnte nicht gesendet werden: ' + (e.message||'Zustimmung fehlt'), 'error');
+      dbg('Mail.Send Token fehlgeschlagen:', e.message);
+      return;
+    }
   }
+
+  let sent = 0;
   for (const m of mentions) {
-    if (!m.mail) continue;
+    if (!m.mail) { dbg('Mention ohne E-Mail übersprungen', m); continue; }
     try {
       const r = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
         method: 'POST',
@@ -1153,12 +1169,18 @@ async function sendMentionNotifications(mentions, ticketId, commentText) {
           saveToSentItems: false
         })
       });
-      if (!r.ok) throw new Error('HTTP '+r.status+': '+await r.text().catch(()=>''));
+      if (!r.ok) {
+        const detail = await r.text().catch(()=>'');
+        throw new Error(`HTTP ${r.status}: ${detail}`);
+      }
+      sent++;
       dbg(`Mention-E-Mail → ${m.mail} ✓`);
     } catch(e) {
+      toast(`E-Mail an ${m.name} fehlgeschlagen: ${e.message}`, 'error');
       dbg(`Mention-E-Mail Fehler (${m.mail}):`, e.message);
     }
   }
+  if (sent > 0) toast(`Benachrichtigung an ${sent} Person${sent>1?'en':''} gesendet`, 'success');
 }
 
 async function postTicketComment(id, inputId) {
@@ -1934,9 +1956,9 @@ function buildReports() {
     ${barChart(statusData, l=>STATUS_COLORS[l]||'#94a3b8')}
   </div>`;
 
-  // Prio chart
+  // Prio chart — normalise raw SP values ("Mittel"→"Normal", "high"→"Hoch" etc.) before grouping
   if (cPrio) {
-    const prioData = countBy(allTickets, t=>(t.fields||{})[cPrio]||'');
+    const prioData = countBy(allTickets, t=>normPrio((t.fields||{})[cPrio]||''));
     html += `<div class="rpt-card">
       <div class="rpt-title">🔴 Tickets nach Priorität</div>
       ${barChart(prioData, l=>PRIO_COLORS[l]||'#94a3b8')}
