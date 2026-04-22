@@ -2248,7 +2248,7 @@ const PA_API          = 'https://api.flow.microsoft.com';
 async function getFlowToken() {
   // Power Automate requires its own scope, separate from Graph
   const req = {
-    scopes: ['https://service.flow.microsoft.com/'],
+    scopes: ['https://service.flow.microsoft.com/.default'],
     account,
     authority: `https://login.microsoftonline.com/${TENANT_ID}`
   };
