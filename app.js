@@ -205,10 +205,11 @@ async function doLogin() {
 
 async function bootDone() {
   $id('boot-sub').textContent = 'Prüfe Berechtigungen…';
-  const email = (account?.username || '').toLowerCase();
-  const role  = await checkPerm('tickets', email);
-  if (role === 'none') { showNoAccess(email); return; }
-  window._appRole = role;
+  // PERM CHECK DEACTIVATED — managed via M365 directly
+  // const email = (account?.username || '').toLowerCase();
+  // const role  = await checkPerm('tickets', email);
+  // if (role === 'none') { showNoAccess(email); return; }
+  // window._appRole = role;
   $id('boot').style.display='none';
   $id('app').style.display='flex';
   $id('hdr-av').textContent = (account?.name||'?').split(' ').map(n=>n[0]||'').join('').substring(0,2).toUpperCase();
