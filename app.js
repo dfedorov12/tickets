@@ -2246,11 +2246,11 @@ const ENTRA_FLOW_ID   = '722002ce-4393-4397-b0a1-0e918dccc91e';
 const PA_API          = 'https://api.flow.microsoft.com';
 
 async function getFlowToken() {
-  // Power Automate requires its own scope, separate from Graph
+  const tenantId = account?.tenantId || TENANT_ID;
   const req = {
     scopes: ['https://service.flow.microsoft.com/.default'],
     account,
-    authority: `https://login.microsoftonline.com/${TENANT_ID}`
+    authority: `https://login.microsoftonline.com/${tenantId}`
   };
   try {
     return (await msalApp.acquireTokenSilent(req)).accessToken;
@@ -2258,8 +2258,13 @@ async function getFlowToken() {
     const needs = e.name === 'InteractionRequiredAuthError'
       || (e.message||'').includes('interaction_required')
       || (e.message||'').includes('consent_required')
-      || (e.message||'').includes('login_required');
+      || (e.message||'').includes('login_required')
+      || (e.message||'').includes('multiple_matching_tokens');
     if (!needs) throw e;
+    try {
+      for (const k of Object.keys(sessionStorage))
+        if (k.includes('interaction_in_progress')) sessionStorage.removeItem(k);
+    } catch {}
     return (await msalApp.acquireTokenPopup(req)).accessToken;
   }
 }
