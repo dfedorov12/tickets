@@ -2245,12 +2245,12 @@ const ENTRA_FLOW_ENV  = 'Default-fdb70646-023a-403b-a4b9-1f474a935123';
 const ENTRA_FLOW_ID   = '722002ce-4393-4397-b0a1-0e918dccc91e';
 const PA_API          = 'https://api.flow.microsoft.com';
 
+const PA_SCOPE = 'https://service.flow.microsoft.com/.default';
+
 async function getFlowToken() {
-  // Bypass MSAL entirely — use the existing refresh token from cache directly.
-  // MSAL's popup/silent for a second resource causes interaction_in_progress conflicts.
   const tenantId = account?.tenantId || TENANT_ID;
 
-  // Find the MSAL refresh token in localStorage
+  // Step 1: try to exchange the MSAL refresh token directly (no popup, no interaction)
   let refreshToken = null;
   try {
     for (const key of Object.keys(localStorage)) {
@@ -2260,25 +2260,38 @@ async function getFlowToken() {
       }
     }
   } catch {}
-  if (!refreshToken) throw new Error('Kein Refresh-Token gefunden — bitte Seite neu laden und erneut anmelden');
 
-  // Exchange refresh token for a PA access token directly via AAD token endpoint
-  const r = await fetch(
-    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type:    'refresh_token',
-        client_id:     CLIENT_ID,
-        refresh_token: refreshToken,
-        scope:         'https://service.flow.microsoft.com/.default'
-      })
+  if (refreshToken) {
+    const r = await fetch(
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type:    'refresh_token',
+          client_id:     CLIENT_ID,
+          refresh_token: refreshToken,
+          scope:         PA_SCOPE
+        })
+      }
+    );
+    const d = await r.json();
+
+    // Success → return immediately
+    if (d.access_token) return d.access_token;
+
+    // AADSTS65001 = consent not yet granted → fall through to popup consent below
+    // Any other error → throw right away
+    if (d.error && !d.error_description?.includes('AADSTS65001')) {
+      throw new Error(d.error_description || d.error);
     }
-  );
-  const d = await r.json();
-  if (d.error) throw new Error(d.error_description || d.error);
-  return d.access_token;
+  }
+
+  // Step 2: consent not yet given (AADSTS65001) or no refresh token found.
+  // Open a popup to grant consent for the PA scope once — after this the silent path will work.
+  toast('Einmalige Einwilligung für Power Automate erforderlich — Popup wird geöffnet…', 'info');
+  const res = await msalApp.acquireTokenPopup({ scopes: [PA_SCOPE], account });
+  return res.accessToken;
 }
 
 async function runEntraGeraeteFlow() {
