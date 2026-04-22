@@ -1128,6 +1128,10 @@ async function sendMentionNotifications(mentions, ticketId, commentText) {
   const ticketTitle = ticket?.fields?.[_tCol] || '';
   const senderName  = account?.name || 'Ticketsystem';
   const ticketUrl   = 'https://dfedorov12.github.io/tickets/';
+  // Direct SharePoint link to the ticket item (DispForm)
+  const spTicketUrl = ticketListId
+    ? `https://dihag.sharepoint.com/sites/ticket/_layouts/15/listform.aspx?PageType=4&ListId={${ticketListId}}&ID=${ticketId}`
+    : null;
 
   // Graph-Token mit Mail.Send holen (SCOPES enthält Mail.Send).
   // forceRefresh=true stellt sicher dass ein frischer Token mit allen Scopes geholt wird,
@@ -1155,7 +1159,10 @@ async function sendMentionNotifications(mentions, ticketId, commentText) {
     `<strong>#${ticketId}${ticketTitle ? ' – ' + esc(ticketTitle) : ''}</strong> erwähnt:</p>` +
     `<blockquote style="border-left:3px solid #0078d4;padding:8px 12px;background:#f0f8ff;margin:12px 0;">` +
     `${esc(commentText)}</blockquote>` +
-    `<p><a href="${ticketUrl}">Ticket öffnen →</a></p>`;
+    `<p>` +
+    (spTicketUrl ? `<a href="${spTicketUrl}" style="color:#0078d4;font-weight:600;">In SharePoint öffnen →</a>&nbsp;&nbsp;` : '') +
+    `<a href="${ticketUrl}" style="color:#666;font-size:12px;">Ticketsystem öffnen</a>` +
+    `</p>`;
 
   let sent = 0;
   for (const m of mentions) {
