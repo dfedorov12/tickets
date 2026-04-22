@@ -1159,10 +1159,7 @@ async function sendMentionNotifications(mentions, ticketId, commentText) {
     `<strong>#${ticketId}${ticketTitle ? ' – ' + esc(ticketTitle) : ''}</strong> erwähnt:</p>` +
     `<blockquote style="border-left:3px solid #0078d4;padding:8px 12px;background:#f0f8ff;margin:12px 0;">` +
     `${esc(commentText)}</blockquote>` +
-    `<p>` +
-    (spTicketUrl ? `<a href="${spTicketUrl}" style="color:#0078d4;font-weight:600;">In SharePoint öffnen →</a>&nbsp;&nbsp;` : '') +
-    `<a href="${ticketUrl}" style="color:#666;font-size:12px;">Ticketsystem öffnen</a>` +
-    `</p>`;
+    `<p><a href="${spTicketUrl || ticketUrl}" style="color:#0078d4;font-weight:600;">In SharePoint öffnen →</a></p>`;
 
   let sent = 0;
   for (const m of mentions) {
