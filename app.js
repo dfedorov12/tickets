@@ -2247,25 +2247,28 @@ const PA_API          = 'https://api.flow.microsoft.com';
 
 async function getFlowToken() {
   const tenantId = account?.tenantId || TENANT_ID;
+
+  // Remove conflicting PA cache entries so MSAL doesn't find multiple matches
+  try {
+    Object.keys(localStorage)
+      .filter(k => k.toLowerCase().includes('flow.microsoft.com'))
+      .forEach(k => localStorage.removeItem(k));
+    Object.keys(sessionStorage)
+      .filter(k => k.includes('interaction_in_progress'))
+      .forEach(k => sessionStorage.removeItem(k));
+  } catch {}
+
   const req = {
     scopes: ['https://service.flow.microsoft.com/.default'],
     account,
-    authority: `https://login.microsoftonline.com/${tenantId}`,
-    forceRefresh: true   // bypass cache → no multiple_matching_tokens
+    authority: `https://login.microsoftonline.com/${tenantId}`
   };
+
+  // Silent first (cache now clean), popup on any failure
   try {
     return (await msalApp.acquireTokenSilent(req)).accessToken;
-  } catch(e) {
-    const needs = e.name === 'InteractionRequiredAuthError'
-      || (e.message||'').includes('interaction_required')
-      || (e.message||'').includes('consent_required')
-      || (e.message||'').includes('login_required');
-    if (!needs) throw e;
-    try {
-      for (const k of Object.keys(sessionStorage))
-        if (k.includes('interaction_in_progress')) sessionStorage.removeItem(k);
-    } catch {}
-    return (await msalApp.acquireTokenPopup({ ...req, forceRefresh: false })).accessToken;
+  } catch {
+    return (await msalApp.acquireTokenPopup(req)).accessToken;
   }
 }
 
