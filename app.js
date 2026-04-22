@@ -2250,7 +2250,8 @@ async function getFlowToken() {
   const req = {
     scopes: ['https://service.flow.microsoft.com/.default'],
     account,
-    authority: `https://login.microsoftonline.com/${tenantId}`
+    authority: `https://login.microsoftonline.com/${tenantId}`,
+    forceRefresh: true   // bypass cache → no multiple_matching_tokens
   };
   try {
     return (await msalApp.acquireTokenSilent(req)).accessToken;
@@ -2258,14 +2259,13 @@ async function getFlowToken() {
     const needs = e.name === 'InteractionRequiredAuthError'
       || (e.message||'').includes('interaction_required')
       || (e.message||'').includes('consent_required')
-      || (e.message||'').includes('login_required')
-      || (e.message||'').includes('multiple_matching_tokens');
+      || (e.message||'').includes('login_required');
     if (!needs) throw e;
     try {
       for (const k of Object.keys(sessionStorage))
         if (k.includes('interaction_in_progress')) sessionStorage.removeItem(k);
     } catch {}
-    return (await msalApp.acquireTokenPopup(req)).accessToken;
+    return (await msalApp.acquireTokenPopup({ ...req, forceRefresh: false })).accessToken;
   }
 }
 
