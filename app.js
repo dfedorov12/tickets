@@ -2245,30 +2245,40 @@ const ENTRA_FLOW_ENV  = 'Default-fdb70646-023a-403b-a4b9-1f474a935123';
 const ENTRA_FLOW_ID   = '722002ce-4393-4397-b0a1-0e918dccc91e';
 const PA_API          = 'https://api.flow.microsoft.com';
 
+let _flowTokenBusy = false;
+
 async function getFlowToken() {
-  const tenantId = account?.tenantId || TENANT_ID;
-
-  // Remove conflicting PA cache entries so MSAL doesn't find multiple matches
+  if (_flowTokenBusy) throw new Error('Flow-Token wird bereits abgerufen, bitte warten…');
+  _flowTokenBusy = true;
   try {
-    Object.keys(localStorage)
-      .filter(k => k.toLowerCase().includes('flow.microsoft.com'))
-      .forEach(k => localStorage.removeItem(k));
-    Object.keys(sessionStorage)
-      .filter(k => k.includes('interaction_in_progress'))
-      .forEach(k => sessionStorage.removeItem(k));
-  } catch {}
+    const tenantId = account?.tenantId || TENANT_ID;
 
-  const req = {
-    scopes: ['https://service.flow.microsoft.com/.default'],
-    account,
-    authority: `https://login.microsoftonline.com/${tenantId}`
-  };
+    // Aggressively clear ALL MSAL interaction locks + PA cache entries
+    try {
+      // sessionStorage: clear any interaction lock (MSAL uses various key formats)
+      Object.keys(sessionStorage)
+        .filter(k => k.includes('interaction') || k.includes('msal'))
+        .forEach(k => sessionStorage.removeItem(k));
+      // localStorage: clear stale PA token entries
+      Object.keys(localStorage)
+        .filter(k => k.toLowerCase().includes('flow.microsoft.com'))
+        .forEach(k => localStorage.removeItem(k));
+    } catch {}
 
-  // Silent first (cache now clean), popup on any failure
-  try {
-    return (await msalApp.acquireTokenSilent(req)).accessToken;
-  } catch {
-    return (await msalApp.acquireTokenPopup(req)).accessToken;
+    const req = {
+      scopes: ['https://service.flow.microsoft.com/.default'],
+      account,
+      authority: `https://login.microsoftonline.com/${tenantId}`
+    };
+
+    // Silent first, popup on any failure
+    try {
+      return (await msalApp.acquireTokenSilent(req)).accessToken;
+    } catch {
+      return (await msalApp.acquireTokenPopup(req)).accessToken;
+    }
+  } finally {
+    _flowTokenBusy = false;
   }
 }
 
