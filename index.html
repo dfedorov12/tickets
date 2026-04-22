@@ -22,6 +22,29 @@
   <button class="boot-btn" id="boot-btn" style="display:none;" onclick="doLogin()">Anmelden</button>
 </div>
 
+<!-- NO ACCESS -->
+<div id="no-access" style="display:none;position:fixed;inset:0;background:#f2f4f7;align-items:center;justify-content:center;z-index:9999;">
+  <div style="text-align:center;max-width:440px;padding:40px;background:#fff;border-radius:16px;box-shadow:0 8px 40px rgba(10,31,60,.12);font-family:'Inter',system-ui,sans-serif;">
+    <div style="font-size:56px;margin-bottom:16px">🚫</div>
+    <h2 style="font-size:22px;color:#0a1f3c;margin-bottom:8px;font-weight:700">Kein Zugriff</h2>
+    <p id="nac-msg" style="color:#5a6a7e;margin-bottom:24px;font-size:14px;line-height:1.6"></p>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+      <button id="nac-req-btn" onclick="requestAccess()"
+        style="padding:9px 20px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;">
+        📧 Freigabe anfragen
+      </button>
+      <button onclick="doLogout()"
+        style="padding:9px 20px;background:#fff;color:#0a1f3c;border:1.5px solid #d0d5dd;border-radius:8px;font-size:14px;cursor:pointer;">
+        Abmelden
+      </button>
+    </div>
+    <p id="nac-sent" style="display:none;color:#16a34a;margin-top:16px;font-size:13px;font-weight:500">
+      ✓ Anfrage wurde versendet. Die IT meldet sich bei dir.
+    </p>
+    <p id="nac-err" style="display:none;color:#c0392b;margin-top:12px;font-size:12px"></p>
+  </div>
+</div>
+
 <!-- APP -->
 <div id="app" style="display:none;">
   <header>

@@ -203,12 +203,104 @@ async function doLogin() {
   }
 }
 
-function bootDone() {
+async function bootDone() {
+  $id('boot-sub').textContent = 'Prüfe Berechtigungen…';
+  const email = (account?.username || '').toLowerCase();
+  const role  = await checkPerm('tickets', email);
+  if (role === 'none') { showNoAccess(email); return; }
+  window._appRole = role;
   $id('boot').style.display='none';
   $id('app').style.display='flex';
   $id('hdr-av').textContent = (account?.name||'?').split(' ').map(n=>n[0]||'').join('').substring(0,2).toUpperCase();
   initTickets();
   buildAutoGrid();
+}
+
+/* ── PERMISSION CHECK ─────────────────────────────────────────────── */
+const PERM_SITE = 'dihag.sharepoint.com:/sites/ticket';
+const PERM_LIST = 'AppPermissions';
+let _pSiteId = null, _pListId = null;
+
+async function checkPerm(appName, userEmail) {
+  try {
+    if (!_pSiteId) {
+      const s = await gGet(`/sites/${PERM_SITE}`);
+      _pSiteId = s.id;
+    }
+    if (!_pListId) {
+      try {
+        const l = await gGet(`/sites/${_pSiteId}/lists/${PERM_LIST}`);
+        _pListId = l.id;
+      } catch { return 'none'; } // list not found → blocked
+    }
+    const data = await gGet(`/sites/${_pSiteId}/lists/${_pListId}/items?$expand=fields&$top=999`);
+    const RANK = { admin: 3, editor: 2, viewer: 1, none: 0 };
+    let best = -1;
+    for (const item of (data.value || [])) {
+      const f = item.fields || {};
+      if ((f.UserEmail||'').toLowerCase() === userEmail) {
+        if (f.App === appName || f.App === '*') {
+          best = Math.max(best, RANK[f.Role] ?? 0);
+        }
+      }
+    }
+    // No entry found → blocked
+    if (best === -1) return 'none';
+    return Object.keys(RANK).find(k => RANK[k] === best) || 'none';
+  } catch(e) {
+    console.warn('[checkPerm]', e.message);
+    return 'none'; // fail-safe: block on error
+  }
+}
+
+function showNoAccess(email) {
+  $id('boot').style.display = 'none';
+  const el = $id('no-access');
+  el.style.display = 'flex';
+  $id('nac-msg').textContent =
+    `Du (${email}) hast aktuell keinen Zugriff auf das Ticketsystem. ` +
+    `Stelle eine Anfrage — die IT schaltet dich frei.`;
+}
+
+async function requestAccess() {
+  const btn = $id('nac-req-btn');
+  btn.disabled = true; btn.textContent = '…';
+  const email = account?.username || '';
+  const name  = account?.name || email;
+  const now   = new Date().toLocaleString('de-DE');
+  try {
+    await gPost('/me/sendMail', {
+      message: {
+        subject: `Freigabe-Anfrage: Ticketsystem – ${name}`,
+        body: {
+          contentType: 'HTML',
+          content: `<p>Hallo IT-Team,</p>
+<p>folgende Person beantragt Zugriff auf das <strong>DIHAG Ticketsystem</strong>:</p>
+<table style="border-collapse:collapse;font-size:14px;font-family:sans-serif">
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Name</td><td><strong>${name}</strong></td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">E-Mail</td><td>${email}</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">App</td><td>Ticketsystem</td></tr>
+  <tr><td style="padding:4px 12px 4px 0;color:#666">Datum</td><td>${now}</td></tr>
+</table>
+<p style="margin-top:16px">Freigabe im <a href="https://dfedorov12.github.io/admin/">Admin-Portal</a> erteilen.</p>
+<p style="color:#888;font-size:12px">Diese Nachricht wurde automatisch vom DIHAG Ticketsystem gesendet.</p>`
+        },
+        toRecipients: [{ emailAddress: { address: 'ticket@dihag.com' } }]
+      },
+      saveToSentItems: false
+    });
+    $id('nac-sent').style.display = 'block';
+    $id('nac-req-btn').style.display = 'none';
+  } catch(e) {
+    $id('nac-err').style.display = 'block';
+    $id('nac-err').textContent = `Fehler: ${e.message}`;
+    btn.disabled = false; btn.textContent = '📧 Freigabe anfragen';
+  }
+}
+
+function doLogout() {
+  msalApp?.logoutPopup({ account }).catch(() => {});
+  location.reload();
 }
 
 async function getToken() {
