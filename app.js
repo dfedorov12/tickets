@@ -1120,22 +1120,45 @@ function selectCommentMention(el, taId, ddId) {
 }
 
 async function sendMentionNotifications(mentions, ticketId, commentText) {
-  // Use SharePoint's own email API (SP.Utilities.Utility.SendEmail).
-  // This uses the SP token we already have — no Mail.Send Graph permission needed.
-  // SharePoint sends the mail via its own outbound mail configuration, just like
-  // native @mention notifications do.
+  console.log('[MENTION-MAIL] Funktion aufgerufen', { mentions, ticketId, commentText });
+
+  if (!mentions || mentions.length === 0) {
+    console.warn('[MENTION-MAIL] Keine Mentions übergeben – Abbruch');
+    return;
+  }
+
   const ticket = allTickets.find(t => t.id == ticketId);
   const ticketTitle = ticket?.fields?.[titleCol] || '';
   const senderName = account?.name || 'Ticketsystem';
   const ticketUrl = 'https://dfedorov12.github.io/tickets/';
 
+  // Schritt 1: SP-Token holen
   let spTok;
   try {
     spTok = await getSpToken();
+    console.log('[MENTION-MAIL] SP-Token erhalten ✓');
   } catch(e) {
-    toast('E-Mail: SP-Token-Fehler – ' + (e.message||'Anmeldung erforderlich'), 'error');
-    dbg('sendMentionNotifications: getSpToken fehlgeschlagen', e);
+    console.error('[MENTION-MAIL] getSpToken fehlgeschlagen:', e);
+    toast('E-Mail: SP-Token-Fehler – ' + (e.message || 'Anmeldung erforderlich'), 'error');
     return;
+  }
+
+  // Schritt 2: Request-Digest für POST-Anfragen holen
+  let digest = '';
+  try {
+    const ctxR = await fetch('https://dihag.sharepoint.com/sites/ticket/_api/contextinfo', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + spTok, Accept: 'application/json;odata=nometadata' }
+    });
+    if (ctxR.ok) {
+      const ctxJson = await ctxR.json();
+      digest = ctxJson.FormDigestValue || '';
+      console.log('[MENTION-MAIL] Digest erhalten ✓');
+    } else {
+      console.warn('[MENTION-MAIL] Digest-Request fehlgeschlagen – versuche ohne Digest');
+    }
+  } catch(e) {
+    console.warn('[MENTION-MAIL] Digest-Fehler (ignoriert):', e.message);
   }
 
   const spSite = 'https://dihag.sharepoint.com/sites/ticket';
@@ -1150,7 +1173,11 @@ async function sendMentionNotifications(mentions, ticketId, commentText) {
 
   let sent = 0;
   for (const m of mentions) {
-    if (!m.mail) { dbg('Mention ohne E-Mail übersprungen', m); continue; }
+    console.log('[MENTION-MAIL] Verarbeite Mention:', m);
+    if (!m.mail) {
+      console.warn('[MENTION-MAIL] Mention ohne E-Mail übersprungen:', m);
+      continue;
+    }
     try {
       const payload = {
         properties: {
@@ -1160,28 +1187,28 @@ async function sendMentionNotifications(mentions, ticketId, commentText) {
           Body:    bodyHtml
         }
       };
+      console.log('[MENTION-MAIL] Sende an:', m.mail, payload);
       const r = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          Authorization:  'Bearer ' + spTok,
-          Accept:         'application/json;odata=verbose',
-          'Content-Type': 'application/json;odata=verbose',
-          'X-RequestDigest': 'bypass'   // not needed for sendMail endpoint
+          Authorization:    'Bearer ' + spTok,
+          Accept:           'application/json;odata=verbose',
+          'Content-Type':   'application/json;odata=verbose',
+          'X-RequestDigest': digest
         },
         body: JSON.stringify(payload)
       });
-      if (!r.ok) {
-        const detail = await r.text().catch(() => '');
-        throw new Error(`HTTP ${r.status}: ${detail}`);
-      }
+      const responseText = await r.text().catch(() => '');
+      console.log('[MENTION-MAIL] Antwort:', r.status, responseText);
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${responseText}`);
       sent++;
-      dbg(`Mention-E-Mail (SP) → ${m.mail} ✓`);
     } catch(e) {
+      console.error('[MENTION-MAIL] Fehler für', m.mail, ':', e);
       toast(`E-Mail an ${m.name} fehlgeschlagen: ${e.message}`, 'error');
-      dbg(`Mention-E-Mail Fehler (${m.mail}):`, e.message);
     }
   }
   if (sent > 0) toast(`Benachrichtigung an ${sent} Person${sent > 1 ? 'en' : ''} gesendet`, 'success');
+  console.log('[MENTION-MAIL] Fertig – gesendet:', sent, '/', mentions.length);
 }
 
 async function postTicketComment(id, inputId) {
@@ -1191,8 +1218,9 @@ async function postTicketComment(id, inputId) {
   const text = (ta?.value||'').trim();
   if (!text) return;
   // SP Comments API rejects all mention properties — post as plain text only.
-  // @mention notifications are delivered via Graph email instead.
+  // @mention notifications are delivered via SP email API instead.
   const rawMentions = _commentMentions[taId] || [];
+  console.log('[COMMENT] taId:', taId, '| rawMentions:', JSON.stringify(rawMentions));
   try {
     const spTok = await getSpToken();
     const url = `https://dihag.sharepoint.com/sites/ticket/_api/web/lists(guid'${ticketListId}')/GetItemById(${id})/Comments`;
