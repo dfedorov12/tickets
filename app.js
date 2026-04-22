@@ -1121,49 +1121,34 @@ function selectCommentMention(el, taId, ddId) {
 
 async function sendMentionNotifications(mentions, ticketId, commentText) {
   console.log('[MENTION-MAIL] Funktion aufgerufen', { mentions, ticketId, commentText });
+  if (!mentions || mentions.length === 0) { console.warn('[MENTION-MAIL] Keine Mentions – Abbruch'); return; }
 
-  if (!mentions || mentions.length === 0) {
-    console.warn('[MENTION-MAIL] Keine Mentions übergeben – Abbruch');
-    return;
-  }
-
-  const ticket = allTickets.find(t => t.id == ticketId);
-  const _tCol = getCol('title') || 'Title';
+  const ticket      = allTickets.find(t => t.id == ticketId);
+  const _tCol       = getCol('title') || 'Title';
   const ticketTitle = ticket?.fields?.[_tCol] || '';
-  const senderName = account?.name || 'Ticketsystem';
-  const ticketUrl = 'https://dfedorov12.github.io/tickets/';
+  const senderName  = account?.name || 'Ticketsystem';
+  const ticketUrl   = 'https://dfedorov12.github.io/tickets/';
 
-  // Schritt 1: SP-Token holen
-  let spTok;
+  // Graph-Token mit Mail.Send holen (SCOPES enthält Mail.Send).
+  // forceRefresh=true stellt sicher dass ein frischer Token mit allen Scopes geholt wird,
+  // auch wenn der Nutzer sich vor Hinzufügen von Mail.Send angemeldet hatte.
+  let mailTok;
   try {
-    spTok = await getSpToken();
-    console.log('[MENTION-MAIL] SP-Token erhalten ✓');
-  } catch(e) {
-    console.error('[MENTION-MAIL] getSpToken fehlgeschlagen:', e);
-    toast('E-Mail: SP-Token-Fehler – ' + (e.message || 'Anmeldung erforderlich'), 'error');
-    return;
-  }
-
-  // Schritt 2: Request-Digest für POST-Anfragen holen
-  let digest = '';
-  try {
-    const ctxR = await fetch('https://dihag.sharepoint.com/sites/ticket/_api/contextinfo', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + spTok, Accept: 'application/json;odata=nometadata' }
-    });
-    if (ctxR.ok) {
-      const ctxJson = await ctxR.json();
-      digest = ctxJson.FormDigestValue || '';
-      console.log('[MENTION-MAIL] Digest erhalten ✓');
-    } else {
-      console.warn('[MENTION-MAIL] Digest-Request fehlgeschlagen – versuche ohne Digest');
+    const res = await msalApp.acquireTokenSilent({ scopes: SCOPES, account, forceRefresh: true });
+    mailTok = res.accessToken;
+    console.log('[MENTION-MAIL] Token (silent+refresh) erhalten ✓, scopes:', res.scopes);
+  } catch(silentErr) {
+    console.warn('[MENTION-MAIL] Silent fehlgeschlagen, versuche Popup:', silentErr.message);
+    try {
+      const res = await msalApp.acquireTokenPopup({ scopes: SCOPES, account });
+      mailTok = res.accessToken;
+      console.log('[MENTION-MAIL] Token (popup) erhalten ✓, scopes:', res.scopes);
+    } catch(popupErr) {
+      console.error('[MENTION-MAIL] Token komplett fehlgeschlagen:', popupErr);
+      toast('E-Mail: Anmeldung/Zustimmung fehlt – bitte neu einloggen (' + popupErr.message + ')', 'error');
+      return;
     }
-  } catch(e) {
-    console.warn('[MENTION-MAIL] Digest-Fehler (ignoriert):', e.message);
   }
-
-  const spSite = 'https://dihag.sharepoint.com/sites/ticket';
-  const endpoint = `${spSite}/_api/SP.Utilities.Utility.SendEmail`;
 
   const bodyHtml =
     `<p><strong>${esc(senderName)}</strong> hat Sie in Ticket ` +
@@ -1175,36 +1160,28 @@ async function sendMentionNotifications(mentions, ticketId, commentText) {
   let sent = 0;
   for (const m of mentions) {
     console.log('[MENTION-MAIL] Verarbeite Mention:', m);
-    if (!m.mail) {
-      console.warn('[MENTION-MAIL] Mention ohne E-Mail übersprungen:', m);
-      continue;
-    }
+    if (!m.mail) { console.warn('[MENTION-MAIL] Kein Mail-Feld:', m); continue; }
     try {
-      const payload = {
-        properties: {
-          __metadata: { type: 'SP.Utilities.EmailProperties' },
-          To:      { results: [m.mail] },
-          Subject: `${senderName} hat Sie in Ticket #${ticketId} erwähnt`,
-          Body:    bodyHtml
-        }
-      };
-      console.log('[MENTION-MAIL] Sende an:', m.mail, payload);
-      const r = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          Authorization:    'Bearer ' + spTok,
-          Accept:           'application/json;odata=verbose',
-          'Content-Type':   'application/json;odata=verbose',
-          'X-RequestDigest': digest
+      const body = JSON.stringify({
+        message: {
+          subject: `${senderName} hat Sie in Ticket #${ticketId} erwähnt`,
+          body: { contentType: 'HTML', content: bodyHtml },
+          toRecipients: [{ emailAddress: { address: m.mail, name: m.name } }]
         },
-        body: JSON.stringify(payload)
+        saveToSentItems: false
       });
-      const responseText = await r.text().catch(() => '');
-      console.log('[MENTION-MAIL] Antwort:', r.status, responseText);
-      if (!r.ok) throw new Error(`HTTP ${r.status}: ${responseText}`);
+      console.log('[MENTION-MAIL] POST me/sendMail →', m.mail);
+      const r = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + mailTok, 'Content-Type': 'application/json' },
+        body
+      });
+      const respText = await r.text().catch(() => '');
+      console.log('[MENTION-MAIL] Antwort:', r.status, respText || '(leer = OK)');
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${respText}`);
       sent++;
     } catch(e) {
-      console.error('[MENTION-MAIL] Fehler für', m.mail, ':', e);
+      console.error('[MENTION-MAIL] Fehler für', m.mail, e);
       toast(`E-Mail an ${m.name} fehlgeschlagen: ${e.message}`, 'error');
     }
   }
