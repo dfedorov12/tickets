@@ -2241,40 +2241,51 @@ function buildDevTableIntune() {
 }
 
 // ── ENTRA GERATEINFO FLOW ─────────────────────────────────────────
-const ENTRA_FLOW_ID   = '0f449951-2766-40b1-8d1f-4b3d0471d271';
-const ENTRA_FLOW_SITE = 'https://dihag.sharepoint.com/sites/IT';
-const ENTRA_FLOW_LIST = 'c71ff7ad-5d3e-4ebe-9523-05a66bf7684d';
+const ENTRA_FLOW_ENV  = 'Default-fdb70646-023a-403b-a4b9-1f474a935123';
+const ENTRA_FLOW_ID   = '722002ce-4393-4397-b0a1-0e918dccc91e';
+const PA_API          = 'https://api.flow.microsoft.com';
+
+async function getFlowToken() {
+  // Power Automate requires its own scope, separate from Graph
+  const req = {
+    scopes: ['https://service.flow.microsoft.com/'],
+    account,
+    authority: `https://login.microsoftonline.com/${TENANT_ID}`
+  };
+  try {
+    return (await msalApp.acquireTokenSilent(req)).accessToken;
+  } catch(e) {
+    const needs = e.name === 'InteractionRequiredAuthError'
+      || (e.message||'').includes('interaction_required')
+      || (e.message||'').includes('consent_required')
+      || (e.message||'').includes('login_required');
+    if (!needs) throw e;
+    return (await msalApp.acquireTokenPopup(req)).accessToken;
+  }
+}
 
 async function runEntraGeraeteFlow() {
   const btn = $id('btn-entra-flow');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Läuft…'; }
   try {
-    // Ensure SP items are loaded so we have item IDs
-    if (!_devSpItems.length) {
-      toast('Lade SP-Liste…', 'info');
-      await loadDevSP(true);
-    }
-    if (!_devSpItems.length) throw new Error('SP-Liste leer oder nicht geladen');
-
-    // Build rows array with all item IDs
-    const rows = _devSpItems.map(it => ({ entity: { ID: it.ID || it.id } }));
-
-    const spTok = await getSpToken();
-    const url = `${ENTRA_FLOW_SITE}/_api/web/lists(guid'${ENTRA_FLOW_LIST}')/RunFlow(flowId='${ENTRA_FLOW_ID}')`;
+    const tok = await getFlowToken();
+    const url = `${PA_API}/providers/Microsoft.ProcessSimple/environments/${ENTRA_FLOW_ENV}`
+              + `/flows/${ENTRA_FLOW_ID}/triggers/manual/run?api-version=2016-11-01`;
     const r = await fetch(url, {
       method: 'POST',
       headers: {
-        Authorization: 'Bearer ' + spTok,
-        'Content-Type': 'application/json;odata=verbose',
-        Accept: 'application/json;odata=verbose'
+        Authorization: 'Bearer ' + tok,
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ rows })
+      body: JSON.stringify({})
     });
-    if (!r.ok) {
+    // 202 Accepted = Flow gestartet, kein Body
+    if (r.status === 202 || r.status === 200) {
+      toast('✓ Flow „Entra Gerateinfo" gestartet', 'success');
+    } else {
       const txt = await r.text().catch(() => '');
-      throw new Error(`SP ${r.status}: ${txt.slice(0, 200)}`);
+      throw new Error(`PA ${r.status}: ${txt.slice(0, 200)}`);
     }
-    toast(`✓ Flow „Entra Gerateinfo" gestartet (${rows.length} Einträge)`, 'success');
   } catch(e) {
     toast(`Flow-Fehler: ${e.message}`, 'error');
     dbg('runEntraGeraeteFlow Fehler', e.message);
