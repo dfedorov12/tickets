@@ -1120,56 +1120,68 @@ function selectCommentMention(el, taId, ddId) {
 }
 
 async function sendMentionNotifications(mentions, ticketId, commentText) {
+  // Use SharePoint's own email API (SP.Utilities.Utility.SendEmail).
+  // This uses the SP token we already have — no Mail.Send Graph permission needed.
+  // SharePoint sends the mail via its own outbound mail configuration, just like
+  // native @mention notifications do.
   const ticket = allTickets.find(t => t.id == ticketId);
   const ticketTitle = ticket?.fields?.[titleCol] || '';
   const senderName = account?.name || 'Ticketsystem';
   const ticketUrl = 'https://dfedorov12.github.io/tickets/';
 
-  // Use the same Graph token as the rest of the app (SCOPES already includes Mail.Send).
-  // This avoids separate consent dialogs — Mail.Send was already granted at login.
-  let mailTok;
+  let spTok;
   try {
-    mailTok = await getToken();
+    spTok = await getSpToken();
   } catch(e) {
-    toast('E-Mail: Token-Fehler – ' + (e.message||'Anmeldung erforderlich'), 'error');
-    dbg('Mail.Send getToken fehlgeschlagen:', e);
+    toast('E-Mail: SP-Token-Fehler – ' + (e.message||'Anmeldung erforderlich'), 'error');
+    dbg('sendMentionNotifications: getSpToken fehlgeschlagen', e);
     return;
   }
+
+  const spSite = 'https://dihag.sharepoint.com/sites/ticket';
+  const endpoint = `${spSite}/_api/SP.Utilities.Utility.SendEmail`;
+
+  const bodyHtml =
+    `<p><strong>${esc(senderName)}</strong> hat Sie in Ticket ` +
+    `<strong>#${ticketId}${ticketTitle ? ' – ' + esc(ticketTitle) : ''}</strong> erwähnt:</p>` +
+    `<blockquote style="border-left:3px solid #0078d4;padding:8px 12px;background:#f0f8ff;margin:12px 0;">` +
+    `${esc(commentText)}</blockquote>` +
+    `<p><a href="${ticketUrl}">Ticket öffnen →</a></p>`;
 
   let sent = 0;
   for (const m of mentions) {
     if (!m.mail) { dbg('Mention ohne E-Mail übersprungen', m); continue; }
     try {
-      const r = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+      const payload = {
+        properties: {
+          __metadata: { type: 'SP.Utilities.EmailProperties' },
+          To:      { results: [m.mail] },
+          Subject: `${senderName} hat Sie in Ticket #${ticketId} erwähnt`,
+          Body:    bodyHtml
+        }
+      };
+      const r = await fetch(endpoint, {
         method: 'POST',
-        headers: { Authorization: 'Bearer '+mailTok, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: {
-            subject: `${senderName} hat Sie in Ticket #${ticketId} erwähnt`,
-            body: {
-              contentType: 'HTML',
-              content: `<p><strong>${esc(senderName)}</strong> hat Sie in einem Kommentar erwähnt:</p>
-<blockquote style="border-left:3px solid #0078d4;padding:8px 12px;background:#f0f8ff;margin:12px 0;">${esc(commentText)}</blockquote>
-<p><strong>Ticket:</strong> #${ticketId}${ticketTitle ? ' – '+esc(ticketTitle) : ''}</p>
-<p><a href="${ticketUrl}" style="color:#0078d4;">Ticket öffnen →</a></p>`
-            },
-            toRecipients: [{ emailAddress: { address: m.mail, name: m.name } }]
-          },
-          saveToSentItems: false
-        })
+        headers: {
+          Authorization:  'Bearer ' + spTok,
+          Accept:         'application/json;odata=verbose',
+          'Content-Type': 'application/json;odata=verbose',
+          'X-RequestDigest': 'bypass'   // not needed for sendMail endpoint
+        },
+        body: JSON.stringify(payload)
       });
       if (!r.ok) {
-        const detail = await r.text().catch(()=>'');
+        const detail = await r.text().catch(() => '');
         throw new Error(`HTTP ${r.status}: ${detail}`);
       }
       sent++;
-      dbg(`Mention-E-Mail → ${m.mail} ✓`);
+      dbg(`Mention-E-Mail (SP) → ${m.mail} ✓`);
     } catch(e) {
       toast(`E-Mail an ${m.name} fehlgeschlagen: ${e.message}`, 'error');
       dbg(`Mention-E-Mail Fehler (${m.mail}):`, e.message);
     }
   }
-  if (sent > 0) toast(`Benachrichtigung an ${sent} Person${sent>1?'en':''} gesendet`, 'success');
+  if (sent > 0) toast(`Benachrichtigung an ${sent} Person${sent > 1 ? 'en' : ''} gesendet`, 'success');
 }
 
 async function postTicketComment(id, inputId) {
