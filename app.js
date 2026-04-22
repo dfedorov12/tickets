@@ -1128,7 +1128,8 @@ async function sendMentionNotifications(mentions, ticketId, commentText) {
   }
 
   const ticket = allTickets.find(t => t.id == ticketId);
-  const ticketTitle = ticket?.fields?.[titleCol] || '';
+  const _tCol = getCol('title') || 'Title';
+  const ticketTitle = ticket?.fields?.[_tCol] || '';
   const senderName = account?.name || 'Ticketsystem';
   const ticketUrl = 'https://dfedorov12.github.io/tickets/';
 
