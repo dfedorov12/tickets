@@ -2250,7 +2250,7 @@ const PA_SCOPE = 'https://service.flow.microsoft.com/.default';
 async function getFlowToken() {
   const tenantId = account?.tenantId || TENANT_ID;
 
-  // Step 1: try to exchange the MSAL refresh token directly (no popup, no interaction)
+  // Step 1: try silent exchange via MSAL refresh token in localStorage (no MSAL interaction at all)
   let refreshToken = null;
   try {
     for (const key of Object.keys(localStorage)) {
@@ -2276,22 +2276,89 @@ async function getFlowToken() {
       }
     );
     const d = await r.json();
-
-    // Success → return immediately
     if (d.access_token) return d.access_token;
-
-    // AADSTS65001 = consent not yet granted → fall through to popup consent below
-    // Any other error → throw right away
+    // Any error other than missing consent → throw immediately
     if (d.error && !d.error_description?.includes('AADSTS65001')) {
       throw new Error(d.error_description || d.error);
     }
+    // AADSTS65001 = consent not yet granted → fall through to custom PKCE popup
   }
 
-  // Step 2: consent not yet given (AADSTS65001) or no refresh token found.
-  // Open a popup to grant consent for the PA scope once — after this the silent path will work.
-  toast('Einmalige Einwilligung für Power Automate erforderlich — Popup wird geöffnet…', 'info');
-  const res = await msalApp.acquireTokenPopup({ scopes: [PA_SCOPE], account });
-  return res.accessToken;
+  // Step 2: Consent missing or no refresh token.
+  // Use a fully custom PKCE popup — no MSAL involved, no interaction_in_progress possible.
+  toast('Einmalige Einwilligung für Power Automate — Popup wird geöffnet…', 'info');
+  return await _paConsentPopup(tenantId);
+}
+
+async function _paConsentPopup(tenantId) {
+  // Redirect URI must match exactly what is registered in the app registration
+  const redirectUri = window.location.href.split('?')[0].split('#')[0];
+
+  // Generate PKCE code_verifier + code_challenge
+  const verifier  = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+  const digest    = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+  const state = (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2));
+
+  const authUrl = 'https://login.microsoftonline.com/' + tenantId + '/oauth2/v2.0/authorize'
+    + '?client_id='             + encodeURIComponent(CLIENT_ID)
+    + '&response_type=code'
+    + '&redirect_uri='          + encodeURIComponent(redirectUri)
+    + '&scope='                 + encodeURIComponent(PA_SCOPE)
+    + '&code_challenge='        + challenge
+    + '&code_challenge_method=S256'
+    + '&state='                 + state
+    + '&prompt=consent';
+
+  return new Promise((resolve, reject) => {
+    const popup = window.open(authUrl, 'pa-consent', 'width=520,height=640,left=200,top=100');
+    if (!popup) {
+      reject(new Error('Popup wurde blockiert — bitte Popup-Blocker für diese Seite erlauben'));
+      return;
+    }
+
+    const check = setInterval(async () => {
+      try {
+        const url = popup.location.href;
+        // Detect redirect back to our app (cross-origin guard: throws while on AAD domain)
+        if (url.startsWith(redirectUri) && url.includes('code=')) {
+          clearInterval(check);
+          popup.close();
+          const params = new URLSearchParams(new URL(url).search);
+          const code = params.get('code');
+          if (!code) { reject(new Error('Kein Autorisierungscode empfangen')); return; }
+
+          // Exchange authorization code → access_token (PKCE, no client secret needed)
+          const r = await fetch(
+            'https://login.microsoftonline.com/' + tenantId + '/oauth2/v2.0/token',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({
+                grant_type:    'authorization_code',
+                client_id:     CLIENT_ID,
+                code,
+                redirect_uri:  redirectUri,
+                code_verifier: verifier,
+                scope:         PA_SCOPE
+              })
+            }
+          );
+          const d = await r.json();
+          if (d.access_token) resolve(d.access_token);
+          else reject(new Error(d.error_description || d.error || 'Token-Austausch fehlgeschlagen'));
+        }
+      } catch { /* cross-origin while popup is on AAD domain — expected */ }
+
+      if (popup.closed) {
+        clearInterval(check);
+        reject(new Error('Popup wurde geschlossen ohne Einwilligung'));
+      }
+    }, 300);
+  });
 }
 
 async function runEntraGeraeteFlow() {
