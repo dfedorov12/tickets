@@ -1,17 +1,14 @@
 // ════════════════════════════════════════════════════════════════
-// PA OAUTH POPUP EARLY EXIT
-// Wenn diese Seite als Redirect-Ziel eines PA-Consent-Popups geladen wird,
-// URL sofort per postMessage zurückschicken und Fenster schließen —
-// BEVOR MSAL oder sonst irgendwas den auth-Code konsumiert.
+// PA CONSENT POPUP DETECTION
+// Wenn state=pa_consent_... in der URL steht, sind wir das Redirect-Ziel
+// unseres eigenen PA-Consent-Popups. BroadcastChannel an Hauptfenster senden,
+// dann "Erledigt"-Screen zeigen und schließen.
+// Kein window.opener nötig — AAD setzt Cross-Origin-Opener-Policy, das nullt opener.
 // ════════════════════════════════════════════════════════════════
-(function () {
-  if (window.opener && location.search.includes('code=') && location.search.includes('state=')) {
-    try { window.opener.postMessage({ type: 'pa-oauth-callback', href: location.href }, '*'); } catch {}
-    window.close();
-    // Verhindern dass der Rest des Skripts weiterläuft
-    document.addEventListener('DOMContentLoaded', function(e) { e.stopImmediatePropagation(); }, true);
-  }
-}());
+window._paConsentPopup = new URLSearchParams(location.search).get('state')?.startsWith('pa_consent_') || false;
+if (window._paConsentPopup) {
+  try { new BroadcastChannel('pa-oauth-callback').postMessage({ href: location.href }); } catch {}
+}
 
 // ════════════════════════════════════════════════════════════════
 // CONFIG
@@ -2262,10 +2259,8 @@ const PA_API          = 'https://api.flow.microsoft.com';
 
 const PA_SCOPE = 'https://service.flow.microsoft.com/.default';
 
-async function getFlowToken() {
-  const tenantId = account?.tenantId || TENANT_ID;
-
-  // Step 1: try silent exchange via MSAL refresh token in localStorage (no MSAL interaction at all)
+// Holt PA-Token via Refresh-Token direkt (kein MSAL, kein Popup)
+async function _getFlowTokenSilent(tenantId) {
   let refreshToken = null;
   try {
     for (const key of Object.keys(localStorage)) {
@@ -2275,111 +2270,78 @@ async function getFlowToken() {
       }
     }
   } catch {}
+  if (!refreshToken) throw new Error('Nicht angemeldet — bitte Seite neu laden');
 
-  if (refreshToken) {
-    const r = await fetch(
-      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          grant_type:    'refresh_token',
-          client_id:     CLIENT_ID,
-          refresh_token: refreshToken,
-          scope:         PA_SCOPE
-        })
-      }
-    );
-    const d = await r.json();
-    if (d.access_token) return d.access_token;
-    // Any error other than missing consent → throw immediately
-    if (d.error && !d.error_description?.includes('AADSTS65001')) {
-      throw new Error(d.error_description || d.error);
+  const r = await fetch(
+    'https://login.microsoftonline.com/' + tenantId + '/oauth2/v2.0/token',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type:    'refresh_token',
+        client_id:     CLIENT_ID,
+        refresh_token: refreshToken,
+        scope:         PA_SCOPE
+      })
     }
-    // AADSTS65001 = consent not yet granted → fall through to custom PKCE popup
+  );
+  const d = await r.json();
+  if (d.access_token) return d.access_token;
+  throw new Error(d.error_description || d.error);
+}
+
+async function getFlowToken() {
+  const tenantId = account?.tenantId || TENANT_ID;
+
+  // Step 1: silent — Refresh-Token direkt gegen PA-Token tauschen
+  try {
+    return await _getFlowTokenSilent(tenantId);
+  } catch (e) {
+    // Nur bei fehlendem Consent weitermachen, sonst sofort werfen
+    if (!e.message?.includes('AADSTS65001') && !e.message?.includes('consent')) throw e;
   }
 
-  // Step 2: Consent missing or no refresh token.
-  // Use a fully custom PKCE popup — no MSAL involved, no interaction_in_progress possible.
+  // Step 2: Consent fehlt → eigenes Popup ohne MSAL
   toast('Einmalige Einwilligung für Power Automate — Popup wird geöffnet…', 'info');
   return await _paConsentPopup(tenantId);
 }
 
 async function _paConsentPopup(tenantId) {
-  // Redirect URI = diese Seite selbst (muss in AAD registriert sein — ist es bereits)
   const redirectUri = window.location.href.split('?')[0].split('#')[0];
-
-  // PKCE
-  const verifier  = Array.from(crypto.getRandomValues(new Uint8Array(32)))
-    .map(b => b.toString(16).padStart(2, '0')).join('');
-  const digest    = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-  const challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-
-  const state = (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2));
+  // Eindeutiger State mit Präfix — die IIFE oben erkennt diesen und setzt _paConsentPopup=true,
+  // sodass die Boot-IIFE die App NICHT initialisiert, sondern nur "Erledigt" zeigt und schließt.
+  const state = 'pa_consent_' + Math.random().toString(36).slice(2);
 
   const authUrl = 'https://login.microsoftonline.com/' + tenantId + '/oauth2/v2.0/authorize'
-    + '?client_id='             + encodeURIComponent(CLIENT_ID)
+    + '?client_id='    + encodeURIComponent(CLIENT_ID)
     + '&response_type=code'
-    + '&redirect_uri='          + encodeURIComponent(redirectUri)
-    + '&scope='                 + encodeURIComponent(PA_SCOPE)
-    + '&code_challenge='        + challenge
-    + '&code_challenge_method=S256'
-    + '&state='                 + state
-    + '&prompt=consent';
+    + '&redirect_uri=' + encodeURIComponent(redirectUri)
+    + '&scope='        + encodeURIComponent(PA_SCOPE)
+    + '&state='        + state
+    + '&login_hint='   + encodeURIComponent(account?.username || '');
+    // Kein prompt=consent → AAD zeigt Consent nur wenn nötig, vermeidet erzwungenen Re-Login
+
+  const popup = window.open(authUrl, 'pa-consent', 'width=520,height=640,left=200,top=100');
+  if (!popup) throw new Error('Popup blockiert — bitte Popup-Blocker für diese Seite erlauben');
 
   return new Promise((resolve, reject) => {
-    const popup = window.open(authUrl, 'pa-consent', 'width=520,height=640,left=200,top=100');
-    if (!popup) {
-      reject(new Error('Popup wurde blockiert — bitte Popup-Blocker für diese Seite erlauben'));
-      return;
-    }
+    // BroadcastChannel statt window.opener — funktioniert auch wenn AAD COOP opener=null setzt
+    const bc = new BroadcastChannel('pa-oauth-callback');
 
-    // Das Popup lädt nach dem Consent diese Seite neu (redirect_uri).
-    // Die IIFE am Anfang von app.js erkennt window.opener + code= und schickt sofort
-    // ein postMessage zurück — BEVOR MSAL den Code konsumieren kann.
-    const onMsg = async (e) => {
-      if (!e.data || e.data.type !== 'pa-oauth-callback') return;
-      window.removeEventListener('message', onMsg);
+    bc.onmessage = async () => {
+      bc.close();
       clearInterval(closedCheck);
-
-      const params = new URLSearchParams(new URL(e.data.href).search);
-      const code   = params.get('code');
-      if (!code) { reject(new Error('Kein Autorisierungscode empfangen')); return; }
-
-      // Code gegen Access-Token tauschen
-      try {
-        const r = await fetch(
-          'https://login.microsoftonline.com/' + tenantId + '/oauth2/v2.0/token',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-              grant_type:    'authorization_code',
-              client_id:     CLIENT_ID,
-              code,
-              redirect_uri:  redirectUri,
-              code_verifier: verifier,
-              scope:         PA_SCOPE
-            })
-          }
-        );
-        const d = await r.json();
-        if (d.access_token) resolve(d.access_token);
-        else reject(new Error(d.error_description || d.error || 'Token-Austausch fehlgeschlagen'));
-      } catch (err) {
-        reject(err);
-      }
+      // Kurz warten damit AAD den Consent intern speichert, dann silent retry
+      await new Promise(r => setTimeout(r, 800));
+      try   { resolve(await _getFlowTokenSilent(tenantId)); }
+      catch (err) { reject(err); }
     };
 
-    window.addEventListener('message', onMsg);
-
-    // Fallback: Popup manuell geschlossen
     const closedCheck = setInterval(() => {
       if (popup.closed) {
         clearInterval(closedCheck);
-        window.removeEventListener('message', onMsg);
-        reject(new Error('Popup wurde geschlossen ohne Einwilligung'));
+        bc.close();
+        reject(new Error('Popup geschlossen ohne Einwilligung'));
       }
     }, 500);
   });
@@ -3920,6 +3882,17 @@ function dmsFormatBytesPerm(b){
 // BOOT
 // ════════════════════════════════════════════════════════════════
 (async()=>{
+  // Wenn wir als PA-Consent-Popup geladen werden, App nicht initialisieren
+  if (window._paConsentPopup) {
+    document.body.style.cssText = 'margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:Inter,sans-serif;background:#f0f4ff';
+    document.body.innerHTML = '<div style="text-align:center;padding:2rem;background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.12);max-width:340px">'
+      + '<div style="font-size:2.5rem;margin-bottom:.75rem">✅</div>'
+      + '<h2 style="margin:0 0 .5rem;font-size:1.2rem;color:#1a3a6b">Einwilligung erteilt</h2>'
+      + '<p style="margin:0;color:#666;font-size:.9rem">Dieses Fenster schließt sich automatisch…</p>'
+      + '</div>';
+    setTimeout(() => window.close(), 1500);
+    return;
+  }
   try{
     const ok = await initAuth();
     if(ok){ bootDone(); }
