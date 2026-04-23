@@ -1,4 +1,19 @@
 // ════════════════════════════════════════════════════════════════
+// PA OAUTH POPUP EARLY EXIT
+// Wenn diese Seite als Redirect-Ziel eines PA-Consent-Popups geladen wird,
+// URL sofort per postMessage zurückschicken und Fenster schließen —
+// BEVOR MSAL oder sonst irgendwas den auth-Code konsumiert.
+// ════════════════════════════════════════════════════════════════
+(function () {
+  if (window.opener && location.search.includes('code=') && location.search.includes('state=')) {
+    try { window.opener.postMessage({ type: 'pa-oauth-callback', href: location.href }, '*'); } catch {}
+    window.close();
+    // Verhindern dass der Rest des Skripts weiterläuft
+    document.addEventListener('DOMContentLoaded', function(e) { e.stopImmediatePropagation(); }, true);
+  }
+}());
+
+// ════════════════════════════════════════════════════════════════
 // CONFIG
 // ════════════════════════════════════════════════════════════════
 const CLIENT_ID   = '75e627e8-2de0-4ec6-bec9-311757b89e08';
@@ -2291,10 +2306,10 @@ async function getFlowToken() {
 }
 
 async function _paConsentPopup(tenantId) {
-  // Redirect URI must match exactly what is registered in the app registration
+  // Redirect URI = diese Seite selbst (muss in AAD registriert sein — ist es bereits)
   const redirectUri = window.location.href.split('?')[0].split('#')[0];
 
-  // Generate PKCE code_verifier + code_challenge
+  // PKCE
   const verifier  = Array.from(crypto.getRandomValues(new Uint8Array(32)))
     .map(b => b.toString(16).padStart(2, '0')).join('');
   const digest    = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
@@ -2320,44 +2335,53 @@ async function _paConsentPopup(tenantId) {
       return;
     }
 
-    const check = setInterval(async () => {
+    // Das Popup lädt nach dem Consent diese Seite neu (redirect_uri).
+    // Die IIFE am Anfang von app.js erkennt window.opener + code= und schickt sofort
+    // ein postMessage zurück — BEVOR MSAL den Code konsumieren kann.
+    const onMsg = async (e) => {
+      if (!e.data || e.data.type !== 'pa-oauth-callback') return;
+      window.removeEventListener('message', onMsg);
+      clearInterval(closedCheck);
+
+      const params = new URLSearchParams(new URL(e.data.href).search);
+      const code   = params.get('code');
+      if (!code) { reject(new Error('Kein Autorisierungscode empfangen')); return; }
+
+      // Code gegen Access-Token tauschen
       try {
-        const url = popup.location.href;
-        // Detect redirect back to our app (cross-origin guard: throws while on AAD domain)
-        if (url.startsWith(redirectUri) && url.includes('code=')) {
-          clearInterval(check);
-          popup.close();
-          const params = new URLSearchParams(new URL(url).search);
-          const code = params.get('code');
-          if (!code) { reject(new Error('Kein Autorisierungscode empfangen')); return; }
+        const r = await fetch(
+          'https://login.microsoftonline.com/' + tenantId + '/oauth2/v2.0/token',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              grant_type:    'authorization_code',
+              client_id:     CLIENT_ID,
+              code,
+              redirect_uri:  redirectUri,
+              code_verifier: verifier,
+              scope:         PA_SCOPE
+            })
+          }
+        );
+        const d = await r.json();
+        if (d.access_token) resolve(d.access_token);
+        else reject(new Error(d.error_description || d.error || 'Token-Austausch fehlgeschlagen'));
+      } catch (err) {
+        reject(err);
+      }
+    };
 
-          // Exchange authorization code → access_token (PKCE, no client secret needed)
-          const r = await fetch(
-            'https://login.microsoftonline.com/' + tenantId + '/oauth2/v2.0/token',
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-              body: new URLSearchParams({
-                grant_type:    'authorization_code',
-                client_id:     CLIENT_ID,
-                code,
-                redirect_uri:  redirectUri,
-                code_verifier: verifier,
-                scope:         PA_SCOPE
-              })
-            }
-          );
-          const d = await r.json();
-          if (d.access_token) resolve(d.access_token);
-          else reject(new Error(d.error_description || d.error || 'Token-Austausch fehlgeschlagen'));
-        }
-      } catch { /* cross-origin while popup is on AAD domain — expected */ }
+    window.addEventListener('message', onMsg);
 
+    // Fallback: Popup manuell geschlossen
+    const closedCheck = setInterval(() => {
       if (popup.closed) {
-        clearInterval(check);
+        clearInterval(closedCheck);
+        window.removeEventListener('message', onMsg);
         reject(new Error('Popup wurde geschlossen ohne Einwilligung'));
       }
-    }, 300);
+    }, 500);
   });
 }
 
