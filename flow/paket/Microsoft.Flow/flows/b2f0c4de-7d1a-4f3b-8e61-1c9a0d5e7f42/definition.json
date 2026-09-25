@@ -1,0 +1,1359 @@
+{
+  "name": "5d1c7b0e-2f7a-4c1e-9b1d-7e2a4c6f0a21",
+  "id": "/providers/Microsoft.Flow/flows/5d1c7b0e-2f7a-4c1e-9b1d-7e2a4c6f0a21",
+  "type": "Microsoft.Flow/flows",
+  "properties": {
+    "apiId": "/providers/Microsoft.PowerApps/apis/shared_logicflows",
+    "displayName": "Helpdesk v2",
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        },
+        "$connections": {
+          "defaultValue": {},
+          "type": "Object"
+        }
+      },
+      "triggers": {
+        "Bei_Eingang_einer_neuen_E-Mail_(V3)": {
+          "splitOn": "@triggerOutputs()?['body/value']",
+          "metadata": {
+            "Id::AAMkADlkOWIyYWZhLTNkZTMtNGE3MS04NDQ5LTI0MjZhNTQ0MWJhYwAuAAAAAACHPNBSpfHVT6UmJVKUkxEKAQAuCOzBabrOSZOZR9xisADKAAAAAAEMAAA=": "Posteingang"
+          },
+          "type": "OpenApiConnectionNotification",
+          "inputs": {
+            "parameters": {
+              "includeAttachments": true,
+              "importance": "Any",
+              "fetchOnlyWithAttachment": false,
+              "folderPath": "Id::AAMkADlkOWIyYWZhLTNkZTMtNGE3MS04NDQ5LTI0MjZhNTQ0MWJhYwAuAAAAAACHPNBSpfHVT6UmJVKUkxEKAQAuCOzBabrOSZOZR9xisADKAAAAAAEMAAA="
+            },
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+              "connectionName": "shared_office365",
+              "operationId": "OnNewEmailV3"
+            },
+            "authentication": "@parameters('$authentication')"
+          }
+        }
+      },
+      "actions": {
+        "Absender": {
+          "type": "Compose",
+          "inputs": "@toLower(trim(coalesce(triggerOutputs()?['body/from'], '')))",
+          "runAfter": {}
+        },
+        "Betreff": {
+          "type": "Compose",
+          "inputs": "@coalesce(triggerOutputs()?['body/subject'], '(ohne Betreff)')",
+          "runAfter": {
+            "Absender": [
+              "Succeeded"
+            ]
+          }
+        },
+        "IstAntwort": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "IstAntwort",
+                "type": "boolean",
+                "value": false
+              }
+            ]
+          },
+          "runAfter": {
+            "Betreff": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Schleifenschutz": {
+          "type": "If",
+          "expression": {
+            "or": [
+              {
+                "equals": [
+                  "@outputs('Absender')",
+                  "ticket@dihag.com"
+                ]
+              },
+              {
+                "startsWith": [
+                  "@toLower(outputs('Betreff'))",
+                  "automatische antwort"
+                ]
+              },
+              {
+                "startsWith": [
+                  "@toLower(outputs('Betreff'))",
+                  "automatic reply"
+                ]
+              },
+              {
+                "startsWith": [
+                  "@toLower(outputs('Betreff'))",
+                  "abwesend"
+                ]
+              },
+              {
+                "startsWith": [
+                  "@toLower(outputs('Betreff'))",
+                  "unzustellbar"
+                ]
+              },
+              {
+                "startsWith": [
+                  "@toLower(outputs('Betreff'))",
+                  "undeliverable"
+                ]
+              },
+              {
+                "startsWith": [
+                  "@outputs('Absender')",
+                  "mailer-daemon"
+                ]
+              },
+              {
+                "startsWith": [
+                  "@outputs('Absender')",
+                  "postmaster"
+                ]
+              },
+              {
+                "contains": [
+                  "@outputs('Absender')",
+                  "noreply"
+                ]
+              },
+              {
+                "contains": [
+                  "@outputs('Absender')",
+                  "no-reply"
+                ]
+              }
+            ]
+          },
+          "actions": {
+            "Ende_automatisch": {
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Cancelled"
+              },
+              "runAfter": {}
+            }
+          },
+          "else": {
+            "actions": {}
+          },
+          "runAfter": {
+            "IstAntwort": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Konfiguration_laden": {
+          "type": "OpenApiConnection",
+          "inputs": {
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+              "connectionName": "shared_sharepointonline",
+              "operationId": "GetItems"
+            },
+            "parameters": {
+              "dataset": "https://dihag.sharepoint.com/sites/ticket",
+              "table": "TicketQueues",
+              "$filter": "Aktiv eq 1",
+              "$top": 500
+            },
+            "authentication": "@parameters('$authentication')"
+          },
+          "runAfter": {
+            "Schleifenschutz": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Fehler_Konfiguration": {
+          "type": "Scope",
+          "actions": {
+            "Admin_Konfiguration": {
+              "type": "OpenApiConnection",
+              "inputs": {
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                  "connectionName": "shared_office365",
+                  "operationId": "SendEmailV2"
+                },
+                "parameters": {
+                  "emailMessage/To": "administrator@dihag.com",
+                  "emailMessage/Subject": "Ticketsystem: Konfiguration nicht lesbar",
+                  "emailMessage/Body": "<p>Die Liste TicketQueues konnte nicht gelesen werden (existiert sie? darf ticket@dihag.com sie lesen?).</p><p><b>Absender:</b> @{outputs('Absender')}<br><b>Betreff:</b> @{outputs('Betreff')}</p><p><a href=\"@{concat('https://make.powerautomate.com/environments/', workflow()?['tags']?['environmentName'], '/flows/', workflow()?['name'], '/runs/', workflow()?['run']?['name'])}\">Flow-Lauf öffnen</a> · Die Mail liegt weiter im Posteingang von ticket@dihag.com.</p>",
+                  "emailMessage/Importance": "High"
+                },
+                "authentication": "@parameters('$authentication')"
+              },
+              "runAfter": {}
+            },
+            "Ende_Konfiguration": {
+              "type": "Terminate",
+              "inputs": {
+                "runStatus": "Failed",
+                "runError": {
+                  "code": "Ticketsystem",
+                  "message": "Konfiguration nicht lesbar"
+                }
+              },
+              "runAfter": {
+                "Admin_Konfiguration": [
+                  "Succeeded",
+                  "Failed",
+                  "Skipped",
+                  "TimedOut"
+                ]
+              }
+            }
+          },
+          "runAfter": {
+            "Konfiguration_laden": [
+              "Failed",
+              "TimedOut"
+            ]
+          }
+        },
+        "Queues": {
+          "type": "Compose",
+          "inputs": "@body('Konfiguration_laden')?['value']",
+          "runAfter": {
+            "Konfiguration_laden": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Ticketnummer": {
+          "type": "Compose",
+          "inputs": "@if(contains(outputs('Betreff'), '[#'), toUpper(trim(first(split(last(split(outputs('Betreff'), '[#')), ']')))), if(contains(outputs('Betreff'), 'Neues Ticket: '), concat('ALT-', first(split(trim(last(split(outputs('Betreff'), 'Neues Ticket: '))), ' '))), ''))",
+          "runAfter": {
+            "Queues": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Kennung": {
+          "type": "Compose",
+          "inputs": "@if(empty(outputs('Ticketnummer')), '', first(split(outputs('Ticketnummer'), '-')))",
+          "runAfter": {
+            "Ticketnummer": [
+              "Succeeded"
+            ]
+          }
+        },
+        "TicketId": {
+          "type": "Compose",
+          "inputs": "@if(empty(outputs('Ticketnummer')), '', last(split(outputs('Ticketnummer'), '-')))",
+          "runAfter": {
+            "Kennung": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Antwort_Queue": {
+          "type": "Query",
+          "inputs": {
+            "from": "@outputs('Queues')",
+            "where": "@and(not(equals(outputs('Kennung'), '')), equals(toUpper(coalesce(item()?['Kennung'], '')), outputs('Kennung')), not(equals(coalesce(item()?['ListenId'], ''), '')))"
+          },
+          "runAfter": {
+            "TicketId": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Antwort_pruefen": {
+          "type": "If",
+          "expression": {
+            "greater": [
+              "@length(body('Antwort_Queue'))",
+              0
+            ]
+          },
+          "actions": {
+            "Ticket_lesen": {
+              "type": "OpenApiConnection",
+              "inputs": {
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                  "connectionName": "shared_sharepointonline",
+                  "operationId": "HttpRequest"
+                },
+                "parameters": {
+                  "dataset": "https://dihag.sharepoint.com/sites/ticket",
+                  "parameters/method": "GET",
+                  "parameters/uri": "_api/web/lists(guid'@{first(body('Antwort_Queue'))?['ListenId']}')/items(@{int(outputs('TicketId'))})?$select=Id,Title,Status,Assignedto0/EMail&$expand=Assignedto0",
+                  "parameters/headers": {
+                    "Accept": "application/json;odata=nometadata",
+                    "Content-Type": "application/json;odata=nometadata"
+                  }
+                },
+                "authentication": "@parameters('$authentication')"
+              },
+              "runAfter": {}
+            },
+            "Antwort_erkannt": {
+              "type": "SetVariable",
+              "inputs": {
+                "name": "IstAntwort",
+                "value": true
+              },
+              "runAfter": {
+                "Ticket_lesen": [
+                  "Succeeded"
+                ]
+              }
+            }
+          },
+          "else": {
+            "actions": {}
+          },
+          "runAfter": {
+            "Antwort_Queue": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Verzweigung": {
+          "type": "If",
+          "expression": {
+            "equals": [
+              "@variables('IstAntwort')",
+              true
+            ]
+          },
+          "actions": {
+            "Html_zu_Text": {
+              "type": "OpenApiConnection",
+              "inputs": {
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_conversionservice",
+                  "connectionName": "shared_conversionservice",
+                  "operationId": "HtmlToText"
+                },
+                "parameters": {
+                  "Content": "@triggerOutputs()?['body/body']"
+                },
+                "authentication": "@parameters('$authentication')"
+              },
+              "runAfter": {}
+            },
+            "Antworttext": {
+              "type": "Compose",
+              "inputs": "@take(trim(first(split(first(split(first(split(first(split(first(split(body('Html_zu_Text'), '-----Ursprüngliche Nachricht-----')), '-----Original Message-----')), '________________________________')), concat(decodeUriComponent('%0A'), 'Von: '))), concat(decodeUriComponent('%0A'), 'From: ')))), 1800)",
+              "runAfter": {
+                "Html_zu_Text": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Kommentar_Inhalt": {
+              "type": "Compose",
+              "inputs": {
+                "text": "✉ Antwort per Mail von @{outputs('Absender')}:@{decodeUriComponent('%0A')}@{decodeUriComponent('%0A')}@{if(empty(outputs('Antworttext')), '(ohne Text – siehe Anhänge)', outputs('Antworttext'))}"
+              },
+              "runAfter": {
+                "Antworttext": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Kommentar_anfuegen": {
+              "type": "OpenApiConnection",
+              "inputs": {
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                  "connectionName": "shared_sharepointonline",
+                  "operationId": "HttpRequest"
+                },
+                "parameters": {
+                  "dataset": "https://dihag.sharepoint.com/sites/ticket",
+                  "parameters/method": "POST",
+                  "parameters/uri": "_api/web/lists(guid'@{first(body('Antwort_Queue'))?['ListenId']}')/GetItemById(@{int(outputs('TicketId'))})/Comments",
+                  "parameters/headers": {
+                    "Accept": "application/json;odata=nometadata",
+                    "Content-Type": "application/json;odata=nometadata"
+                  },
+                  "parameters/body": "@string(outputs('Kommentar_Inhalt'))"
+                },
+                "authentication": "@parameters('$authentication')"
+              },
+              "runAfter": {
+                "Kommentar_Inhalt": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Wieder_oeffnen": {
+              "type": "If",
+              "expression": {
+                "or": [
+                  {
+                    "equals": [
+                      "@body('Ticket_lesen')?['Status']",
+                      "Warten auf Rückmeldung"
+                    ]
+                  },
+                  {
+                    "equals": [
+                      "@body('Ticket_lesen')?['Status']",
+                      "Erledigt"
+                    ]
+                  }
+                ]
+              },
+              "actions": {
+                "Status_in_Bearbeitung_Inhalt": {
+                  "type": "Compose",
+                  "inputs": {
+                    "formValues": [
+                      {
+                        "FieldName": "Status",
+                        "FieldValue": "In Bearbeitung"
+                      }
+                    ],
+                    "bNewDocumentUpdate": false
+                  },
+                  "runAfter": {}
+                },
+                "Status_in_Bearbeitung": {
+                  "type": "OpenApiConnection",
+                  "inputs": {
+                    "host": {
+                      "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                      "connectionName": "shared_sharepointonline",
+                      "operationId": "HttpRequest"
+                    },
+                    "parameters": {
+                      "dataset": "https://dihag.sharepoint.com/sites/ticket",
+                      "parameters/method": "POST",
+                      "parameters/uri": "_api/web/lists(guid'@{first(body('Antwort_Queue'))?['ListenId']}')/items(@{int(outputs('TicketId'))})/ValidateUpdateListItem",
+                      "parameters/headers": {
+                        "Accept": "application/json;odata=nometadata",
+                        "Content-Type": "application/json;odata=nometadata"
+                      },
+                      "parameters/body": "@string(outputs('Status_in_Bearbeitung_Inhalt'))"
+                    },
+                    "authentication": "@parameters('$authentication')"
+                  },
+                  "runAfter": {
+                    "Status_in_Bearbeitung_Inhalt": [
+                      "Succeeded"
+                    ]
+                  }
+                }
+              },
+              "else": {
+                "actions": {}
+              },
+              "runAfter": {
+                "Kommentar_anfuegen": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Antwort_Anhaenge": {
+              "type": "Query",
+              "inputs": {
+                "from": "@triggerOutputs()?['body/attachments']",
+                "where": "@or(not(equals(item()?['isInline'], true)), greater(coalesce(item()?['size'], 999999), 15000))"
+              },
+              "runAfter": {
+                "Wieder_oeffnen": [
+                  "Succeeded",
+                  "Failed",
+                  "Skipped",
+                  "TimedOut"
+                ]
+              }
+            },
+            "Antwort_Anhaenge_speichern": {
+              "type": "Foreach",
+              "foreach": "@body('Antwort_Anhaenge')",
+              "actions": {
+                "Antwort_Anhang": {
+                  "type": "OpenApiConnection",
+                  "inputs": {
+                    "host": {
+                      "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                      "connectionName": "shared_sharepointonline",
+                      "operationId": "CreateAttachment"
+                    },
+                    "parameters": {
+                      "dataset": "https://dihag.sharepoint.com/sites/ticket",
+                      "table": "@first(body('Antwort_Queue'))?['ListenId']",
+                      "itemId": "@int(outputs('TicketId'))",
+                      "displayName": "@{formatDateTime(utcNow(), 'yyyyMMdd-HHmm')}_@{items('Antwort_Anhaenge_speichern')?['name']}",
+                      "body": "@items('Antwort_Anhaenge_speichern')?['contentBytes']"
+                    },
+                    "authentication": "@parameters('$authentication')"
+                  },
+                  "runAfter": {}
+                }
+              },
+              "runAfter": {
+                "Antwort_Anhaenge": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Bearbeiter_Mails": {
+              "type": "Select",
+              "inputs": {
+                "from": "@coalesce(body('Ticket_lesen')?['Assignedto0'], json('[]'))",
+                "select": "@item()?['EMail']"
+              },
+              "runAfter": {
+                "Antwort_Anhaenge_speichern": [
+                  "Succeeded",
+                  "Failed",
+                  "Skipped",
+                  "TimedOut"
+                ]
+              }
+            },
+            "Empfaenger": {
+              "type": "Compose",
+              "inputs": "@if(greater(length(body('Bearbeiter_Mails')), 0), join(body('Bearbeiter_Mails'), ';'), coalesce(first(body('Antwort_Queue'))?['Bearbeiter'], ''))",
+              "runAfter": {
+                "Bearbeiter_Mails": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Bearbeiter_informieren": {
+              "type": "If",
+              "expression": {
+                "not": {
+                  "equals": [
+                    "@outputs('Empfaenger')",
+                    ""
+                  ]
+                }
+              },
+              "actions": {
+                "Info_an_Bearbeiter": {
+                  "type": "OpenApiConnection",
+                  "inputs": {
+                    "host": {
+                      "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                      "connectionName": "shared_office365",
+                      "operationId": "SendEmailV2"
+                    },
+                    "parameters": {
+                      "emailMessage/To": "@outputs('Empfaenger')",
+                      "emailMessage/Subject": "Neue Antwort zu [#@{outputs('Ticketnummer')}] @{body('Ticket_lesen')?['Title']}",
+                      "emailMessage/Body": "<p><b>@{outputs('Absender')}</b> hat auf das Ticket <b>@{outputs('Ticketnummer')}</b> geantwortet:</p><blockquote>@{replace(outputs('Antworttext'), decodeUriComponent('%0A'), '<br>')}</blockquote><p><a href=\"https://dfedorov12.github.io/tickets/#/t/@{outputs('Ticketnummer')}\">Ticket in der App öffnen</a> – bitte dort antworten, damit der Melder die Nachricht bekommt.</p>",
+                      "emailMessage/Importance": "Normal"
+                    },
+                    "authentication": "@parameters('$authentication')"
+                  },
+                  "runAfter": {}
+                }
+              },
+              "else": {
+                "actions": {}
+              },
+              "runAfter": {
+                "Empfaenger": [
+                  "Succeeded"
+                ]
+              }
+            }
+          },
+          "else": {
+            "actions": {
+              "Domain": {
+                "type": "Compose",
+                "inputs": "@last(split(outputs('Absender'), '@'))",
+                "runAfter": {}
+              },
+              "Queue_nach_Domain": {
+                "type": "Query",
+                "inputs": {
+                  "from": "@outputs('Queues')",
+                  "where": "@and(not(equals(item()?['Modus']?['Value'], 'Archiv')), contains(concat(';', toLower(coalesce(item()?['Domains'], '')), ';'), concat(';', outputs('Domain'), ';')))"
+                },
+                "runAfter": {
+                  "Domain": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Standard_Queue": {
+                "type": "Query",
+                "inputs": {
+                  "from": "@outputs('Queues')",
+                  "where": "@and(equals(item()?['Standard'], true), not(equals(item()?['Modus']?['Value'], 'Archiv')))"
+                },
+                "runAfter": {
+                  "Queue_nach_Domain": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Ziel": {
+                "type": "Compose",
+                "inputs": "@if(greater(length(body('Queue_nach_Domain')), 0), first(body('Queue_nach_Domain')), if(greater(length(body('Standard_Queue')), 0), first(body('Standard_Queue')), null))",
+                "runAfter": {
+                  "Standard_Queue": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Keine_Queue": {
+                "type": "If",
+                "expression": {
+                  "equals": [
+                    "@empty(outputs('Ziel'))",
+                    true
+                  ]
+                },
+                "actions": {
+                  "Admin_keine_Queue": {
+                    "type": "OpenApiConnection",
+                    "inputs": {
+                      "host": {
+                        "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                        "connectionName": "shared_office365",
+                        "operationId": "SendEmailV2"
+                      },
+                      "parameters": {
+                        "emailMessage/To": "administrator@dihag.com",
+                        "emailMessage/Subject": "Ticketsystem: keine Queue für Absender",
+                        "emailMessage/Body": "<p>Für diese Mail gibt es keine passende Queue und keine Standard-Queue. Bitte in der App unter Verwaltung → Queues eine Standard-Queue festlegen.</p><p><b>Absender:</b> @{outputs('Absender')}<br><b>Betreff:</b> @{outputs('Betreff')}</p><p><a href=\"@{concat('https://make.powerautomate.com/environments/', workflow()?['tags']?['environmentName'], '/flows/', workflow()?['name'], '/runs/', workflow()?['run']?['name'])}\">Flow-Lauf öffnen</a> · Die Mail liegt weiter im Posteingang von ticket@dihag.com.</p>",
+                        "emailMessage/Importance": "High"
+                      },
+                      "authentication": "@parameters('$authentication')"
+                    },
+                    "runAfter": {}
+                  },
+                  "Ende_keine_Queue": {
+                    "type": "Terminate",
+                    "inputs": {
+                      "runStatus": "Cancelled"
+                    },
+                    "runAfter": {
+                      "Admin_keine_Queue": [
+                        "Succeeded",
+                        "Failed",
+                        "Skipped",
+                        "TimedOut"
+                      ]
+                    }
+                  }
+                },
+                "else": {
+                  "actions": {}
+                },
+                "runAfter": {
+                  "Ziel": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Nur_Hinweis": {
+                "type": "If",
+                "expression": {
+                  "equals": [
+                    "@outputs('Ziel')?['Modus']?['Value']",
+                    "Hinweis"
+                  ]
+                },
+                "actions": {
+                  "Hinweis_senden": {
+                    "type": "OpenApiConnection",
+                    "inputs": {
+                      "host": {
+                        "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                        "connectionName": "shared_office365",
+                        "operationId": "ReplyToV3"
+                      },
+                      "parameters": {
+                        "messageId": "@triggerOutputs()?['body/id']",
+                        "replyParameters/Body": "<p>@{replace(coalesce(outputs('Ziel')?['Hinweistext'], ''), decodeUriComponent('%0A'), '<br>')}</p>",
+                        "replyParameters/ReplyAll": false
+                      },
+                      "authentication": "@parameters('$authentication')"
+                    },
+                    "runAfter": {}
+                  },
+                  "Ende_Hinweis": {
+                    "type": "Terminate",
+                    "inputs": {
+                      "runStatus": "Succeeded"
+                    },
+                    "runAfter": {
+                      "Hinweis_senden": [
+                        "Succeeded",
+                        "Failed",
+                        "Skipped",
+                        "TimedOut"
+                      ]
+                    }
+                  }
+                },
+                "else": {
+                  "actions": {}
+                },
+                "runAfter": {
+                  "Keine_Queue": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Neu_Inhalt": {
+                "type": "Compose",
+                "inputs": {
+                  "listItemCreateInfo": {
+                    "FolderPath": {
+                      "DecodedUrl": "@{outputs('Ziel')?['ListenUrl']}"
+                    },
+                    "UnderlyingObjectType": 0
+                  },
+                  "formValues": [
+                    {
+                      "FieldName": "Title",
+                      "FieldValue": "@{take(outputs('Betreff'), 255)}"
+                    },
+                    {
+                      "FieldName": "E_x002d_Mail_x002d_Adresse",
+                      "FieldValue": "@{outputs('Absender')}"
+                    },
+                    {
+                      "FieldName": "Description",
+                      "FieldValue": "@{take(coalesce(triggerOutputs()?['body/body'], ''), 60000)}"
+                    }
+                  ],
+                  "bNewDocumentUpdate": false
+                },
+                "runAfter": {
+                  "Nur_Hinweis": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Ticket_anlegen": {
+                "type": "OpenApiConnection",
+                "inputs": {
+                  "host": {
+                    "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                    "connectionName": "shared_sharepointonline",
+                    "operationId": "HttpRequest"
+                  },
+                  "parameters": {
+                    "dataset": "https://dihag.sharepoint.com/sites/ticket",
+                    "parameters/method": "POST",
+                    "parameters/uri": "_api/web/lists(guid'@{outputs('Ziel')?['ListenId']}')/AddValidateUpdateItemUsingPath",
+                    "parameters/headers": {
+                      "Accept": "application/json;odata=nometadata",
+                      "Content-Type": "application/json;odata=nometadata"
+                    },
+                    "parameters/body": "@string(outputs('Neu_Inhalt'))"
+                  },
+                  "authentication": "@parameters('$authentication')"
+                },
+                "runAfter": {
+                  "Neu_Inhalt": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Fehler_Anlage": {
+                "type": "Scope",
+                "actions": {
+                  "Admin_Anlage": {
+                    "type": "OpenApiConnection",
+                    "inputs": {
+                      "host": {
+                        "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                        "connectionName": "shared_office365",
+                        "operationId": "SendEmailV2"
+                      },
+                      "parameters": {
+                        "emailMessage/To": "administrator@dihag.com",
+                        "emailMessage/Subject": "Ticketsystem: Ticket konnte nicht angelegt werden",
+                        "emailMessage/Body": "<p>Das Anlegen in der Liste @{outputs('Ziel')?['ListenName']} ist fehlgeschlagen (Liste eingerichtet? Flow-Konto berechtigt?).</p><p><b>Absender:</b> @{outputs('Absender')}<br><b>Betreff:</b> @{outputs('Betreff')}</p><p><a href=\"@{concat('https://make.powerautomate.com/environments/', workflow()?['tags']?['environmentName'], '/flows/', workflow()?['name'], '/runs/', workflow()?['run']?['name'])}\">Flow-Lauf öffnen</a> · Die Mail liegt weiter im Posteingang von ticket@dihag.com.</p>",
+                        "emailMessage/Importance": "High"
+                      },
+                      "authentication": "@parameters('$authentication')"
+                    },
+                    "runAfter": {}
+                  },
+                  "Ende_Anlage": {
+                    "type": "Terminate",
+                    "inputs": {
+                      "runStatus": "Failed",
+                      "runError": {
+                        "code": "Ticketsystem",
+                        "message": "Ticket konnte nicht angelegt werden"
+                      }
+                    },
+                    "runAfter": {
+                      "Admin_Anlage": [
+                        "Succeeded",
+                        "Failed",
+                        "Skipped",
+                        "TimedOut"
+                      ]
+                    }
+                  }
+                },
+                "runAfter": {
+                  "Ticket_anlegen": [
+                    "Failed",
+                    "TimedOut"
+                  ]
+                }
+              },
+              "Id_Feld": {
+                "type": "Query",
+                "inputs": {
+                  "from": "@body('Ticket_anlegen')?['value']",
+                  "where": "@equals(item()?['FieldName'], 'Id')"
+                },
+                "runAfter": {
+                  "Ticket_anlegen": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Neue_Id": {
+                "type": "Compose",
+                "inputs": "@if(greater(length(body('Id_Feld')), 0), first(body('Id_Feld'))?['FieldValue'], '')",
+                "runAfter": {
+                  "Id_Feld": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Id_fehlt": {
+                "type": "If",
+                "expression": {
+                  "equals": [
+                    "@outputs('Neue_Id')",
+                    ""
+                  ]
+                },
+                "actions": {
+                  "Admin_Id": {
+                    "type": "OpenApiConnection",
+                    "inputs": {
+                      "host": {
+                        "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                        "connectionName": "shared_office365",
+                        "operationId": "SendEmailV2"
+                      },
+                      "parameters": {
+                        "emailMessage/To": "administrator@dihag.com",
+                        "emailMessage/Subject": "Ticketsystem: SharePoint hat das Ticket abgelehnt",
+                        "emailMessage/Body": "<p>Antwort von SharePoint: @{string(body('Ticket_anlegen'))}</p><p><b>Absender:</b> @{outputs('Absender')}<br><b>Betreff:</b> @{outputs('Betreff')}</p><p><a href=\"@{concat('https://make.powerautomate.com/environments/', workflow()?['tags']?['environmentName'], '/flows/', workflow()?['name'], '/runs/', workflow()?['run']?['name'])}\">Flow-Lauf öffnen</a> · Die Mail liegt weiter im Posteingang von ticket@dihag.com.</p>",
+                        "emailMessage/Importance": "High"
+                      },
+                      "authentication": "@parameters('$authentication')"
+                    },
+                    "runAfter": {}
+                  },
+                  "Ende_Id": {
+                    "type": "Terminate",
+                    "inputs": {
+                      "runStatus": "Failed",
+                      "runError": {
+                        "code": "Ticketsystem",
+                        "message": "Ticket ohne ID"
+                      }
+                    },
+                    "runAfter": {
+                      "Admin_Id": [
+                        "Succeeded",
+                        "Failed",
+                        "Skipped",
+                        "TimedOut"
+                      ]
+                    }
+                  }
+                },
+                "else": {
+                  "actions": {}
+                },
+                "runAfter": {
+                  "Neue_Id": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Nummer": {
+                "type": "Compose",
+                "inputs": "@concat(outputs('Ziel')?['Kennung'], '-', outputs('Neue_Id'))",
+                "runAfter": {
+                  "Id_fehlt": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Status_Werk_setzen_Inhalt": {
+                "type": "Compose",
+                "inputs": {
+                  "formValues": [
+                    {
+                      "FieldName": "Status",
+                      "FieldValue": "Neu"
+                    },
+                    {
+                      "FieldName": "Werk",
+                      "FieldValue": "@{outputs('Ziel')?['Werk']}"
+                    }
+                  ],
+                  "bNewDocumentUpdate": false
+                },
+                "runAfter": {
+                  "Nummer": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Status_Werk_setzen": {
+                "type": "OpenApiConnection",
+                "inputs": {
+                  "host": {
+                    "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                    "connectionName": "shared_sharepointonline",
+                    "operationId": "HttpRequest"
+                  },
+                  "parameters": {
+                    "dataset": "https://dihag.sharepoint.com/sites/ticket",
+                    "parameters/method": "POST",
+                    "parameters/uri": "_api/web/lists(guid'@{outputs('Ziel')?['ListenId']}')/items(@{outputs('Neue_Id')})/ValidateUpdateListItem",
+                    "parameters/headers": {
+                      "Accept": "application/json;odata=nometadata",
+                      "Content-Type": "application/json;odata=nometadata"
+                    },
+                    "parameters/body": "@string(outputs('Status_Werk_setzen_Inhalt'))"
+                  },
+                  "authentication": "@parameters('$authentication')"
+                },
+                "runAfter": {
+                  "Status_Werk_setzen_Inhalt": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Prio_setzen_Inhalt": {
+                "type": "Compose",
+                "inputs": {
+                  "formValues": [
+                    {
+                      "FieldName": "Priority",
+                      "FieldValue": "@{if(equals(triggerOutputs()?['body/importance'], 'high'), 'Hoch', if(equals(triggerOutputs()?['body/importance'], 'low'), 'Niedrig', 'Normal'))}"
+                    }
+                  ],
+                  "bNewDocumentUpdate": false
+                },
+                "runAfter": {
+                  "Status_Werk_setzen": [
+                    "Succeeded",
+                    "Failed",
+                    "Skipped",
+                    "TimedOut"
+                  ]
+                }
+              },
+              "Prio_setzen": {
+                "type": "OpenApiConnection",
+                "inputs": {
+                  "host": {
+                    "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                    "connectionName": "shared_sharepointonline",
+                    "operationId": "HttpRequest"
+                  },
+                  "parameters": {
+                    "dataset": "https://dihag.sharepoint.com/sites/ticket",
+                    "parameters/method": "POST",
+                    "parameters/uri": "_api/web/lists(guid'@{outputs('Ziel')?['ListenId']}')/items(@{outputs('Neue_Id')})/ValidateUpdateListItem",
+                    "parameters/headers": {
+                      "Accept": "application/json;odata=nometadata",
+                      "Content-Type": "application/json;odata=nometadata"
+                    },
+                    "parameters/body": "@string(outputs('Prio_setzen_Inhalt'))"
+                  },
+                  "authentication": "@parameters('$authentication')"
+                },
+                "runAfter": {
+                  "Prio_setzen_Inhalt": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Zustaendige_setzen": {
+                "type": "If",
+                "expression": {
+                  "not": {
+                    "equals": [
+                      "@coalesce(outputs('Ziel')?['Bearbeiter'], '')",
+                      ""
+                    ]
+                  }
+                },
+                "actions": {
+                  "Bearbeiter_eintragen_Inhalt": {
+                    "type": "Compose",
+                    "inputs": {
+                      "formValues": [
+                        {
+                          "FieldName": "Assignedto0",
+                          "FieldValue": "@{concat('[{''Key'':''i:0#.f|membership|', join(split(outputs('Ziel')?['Bearbeiter'], ';'), '''},{''Key'':''i:0#.f|membership|'), '''}]')}"
+                        }
+                      ],
+                      "bNewDocumentUpdate": false
+                    },
+                    "runAfter": {}
+                  },
+                  "Bearbeiter_eintragen": {
+                    "type": "OpenApiConnection",
+                    "inputs": {
+                      "host": {
+                        "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                        "connectionName": "shared_sharepointonline",
+                        "operationId": "HttpRequest"
+                      },
+                      "parameters": {
+                        "dataset": "https://dihag.sharepoint.com/sites/ticket",
+                        "parameters/method": "POST",
+                        "parameters/uri": "_api/web/lists(guid'@{outputs('Ziel')?['ListenId']}')/items(@{outputs('Neue_Id')})/ValidateUpdateListItem",
+                        "parameters/headers": {
+                          "Accept": "application/json;odata=nometadata",
+                          "Content-Type": "application/json;odata=nometadata"
+                        },
+                        "parameters/body": "@string(outputs('Bearbeiter_eintragen_Inhalt'))"
+                      },
+                      "authentication": "@parameters('$authentication')"
+                    },
+                    "runAfter": {
+                      "Bearbeiter_eintragen_Inhalt": [
+                        "Succeeded"
+                      ]
+                    }
+                  }
+                },
+                "else": {
+                  "actions": {}
+                },
+                "runAfter": {
+                  "Prio_setzen": [
+                    "Succeeded",
+                    "Failed",
+                    "Skipped",
+                    "TimedOut"
+                  ]
+                }
+              },
+              "Melder_setzen_Inhalt": {
+                "type": "Compose",
+                "inputs": {
+                  "formValues": [
+                    {
+                      "FieldName": "Issueloggedby",
+                      "FieldValue": "@{concat('[{''Key'':''i:0#.f|membership|', join(split(outputs('Absender'), ';'), '''},{''Key'':''i:0#.f|membership|'), '''}]')}"
+                    }
+                  ],
+                  "bNewDocumentUpdate": false
+                },
+                "runAfter": {
+                  "Zustaendige_setzen": [
+                    "Succeeded",
+                    "Failed",
+                    "Skipped",
+                    "TimedOut"
+                  ]
+                }
+              },
+              "Melder_setzen": {
+                "type": "OpenApiConnection",
+                "inputs": {
+                  "host": {
+                    "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                    "connectionName": "shared_sharepointonline",
+                    "operationId": "HttpRequest"
+                  },
+                  "parameters": {
+                    "dataset": "https://dihag.sharepoint.com/sites/ticket",
+                    "parameters/method": "POST",
+                    "parameters/uri": "_api/web/lists(guid'@{outputs('Ziel')?['ListenId']}')/items(@{outputs('Neue_Id')})/ValidateUpdateListItem",
+                    "parameters/headers": {
+                      "Accept": "application/json;odata=nometadata",
+                      "Content-Type": "application/json;odata=nometadata"
+                    },
+                    "parameters/body": "@string(outputs('Melder_setzen_Inhalt'))"
+                  },
+                  "authentication": "@parameters('$authentication')"
+                },
+                "runAfter": {
+                  "Melder_setzen_Inhalt": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Erstellt_von_setzen_Inhalt": {
+                "type": "Compose",
+                "inputs": {
+                  "formValues": [
+                    {
+                      "FieldName": "Author",
+                      "FieldValue": "@{concat('[{''Key'':''i:0#.f|membership|', join(split(outputs('Absender'), ';'), '''},{''Key'':''i:0#.f|membership|'), '''}]')}"
+                    }
+                  ],
+                  "bNewDocumentUpdate": true
+                },
+                "runAfter": {
+                  "Melder_setzen": [
+                    "Succeeded",
+                    "Failed",
+                    "Skipped",
+                    "TimedOut"
+                  ]
+                }
+              },
+              "Erstellt_von_setzen": {
+                "type": "OpenApiConnection",
+                "inputs": {
+                  "host": {
+                    "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                    "connectionName": "shared_sharepointonline",
+                    "operationId": "HttpRequest"
+                  },
+                  "parameters": {
+                    "dataset": "https://dihag.sharepoint.com/sites/ticket",
+                    "parameters/method": "POST",
+                    "parameters/uri": "_api/web/lists(guid'@{outputs('Ziel')?['ListenId']}')/items(@{outputs('Neue_Id')})/ValidateUpdateListItem",
+                    "parameters/headers": {
+                      "Accept": "application/json;odata=nometadata",
+                      "Content-Type": "application/json;odata=nometadata"
+                    },
+                    "parameters/body": "@string(outputs('Erstellt_von_setzen_Inhalt'))"
+                  },
+                  "authentication": "@parameters('$authentication')"
+                },
+                "runAfter": {
+                  "Erstellt_von_setzen_Inhalt": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Mail_exportieren": {
+                "type": "OpenApiConnection",
+                "inputs": {
+                  "host": {
+                    "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                    "connectionName": "shared_office365",
+                    "operationId": "ExportEmail_V2"
+                  },
+                  "parameters": {
+                    "messageId": "@triggerOutputs()?['body/id']"
+                  },
+                  "authentication": "@parameters('$authentication')"
+                },
+                "runAfter": {
+                  "Erstellt_von_setzen": [
+                    "Succeeded",
+                    "Failed",
+                    "Skipped",
+                    "TimedOut"
+                  ]
+                }
+              },
+              "Original_anhaengen": {
+                "type": "OpenApiConnection",
+                "inputs": {
+                  "host": {
+                    "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                    "connectionName": "shared_sharepointonline",
+                    "operationId": "CreateAttachment"
+                  },
+                  "parameters": {
+                    "dataset": "https://dihag.sharepoint.com/sites/ticket",
+                    "table": "@outputs('Ziel')?['ListenId']",
+                    "itemId": "@int(outputs('Neue_Id'))",
+                    "displayName": "Original-Mail.eml",
+                    "body": "@body('Mail_exportieren')"
+                  },
+                  "authentication": "@parameters('$authentication')"
+                },
+                "runAfter": {
+                  "Mail_exportieren": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Neu_Anhaenge": {
+                "type": "Query",
+                "inputs": {
+                  "from": "@triggerOutputs()?['body/attachments']",
+                  "where": "@or(not(equals(item()?['isInline'], true)), greater(coalesce(item()?['size'], 999999), 15000))"
+                },
+                "runAfter": {
+                  "Original_anhaengen": [
+                    "Succeeded",
+                    "Failed",
+                    "Skipped",
+                    "TimedOut"
+                  ]
+                }
+              },
+              "Neu_Anhaenge_speichern": {
+                "type": "Foreach",
+                "foreach": "@body('Neu_Anhaenge')",
+                "actions": {
+                  "Neu_Anhang": {
+                    "type": "OpenApiConnection",
+                    "inputs": {
+                      "host": {
+                        "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                        "connectionName": "shared_sharepointonline",
+                        "operationId": "CreateAttachment"
+                      },
+                      "parameters": {
+                        "dataset": "https://dihag.sharepoint.com/sites/ticket",
+                        "table": "@outputs('Ziel')?['ListenId']",
+                        "itemId": "@int(outputs('Neue_Id'))",
+                        "displayName": "@{if(equals(items('Neu_Anhaenge_speichern')?['isInline'], true), concat('Bild-', substring(guid(), 0, 6), '-'), '')}@{items('Neu_Anhaenge_speichern')?['name']}",
+                        "body": "@items('Neu_Anhaenge_speichern')?['contentBytes']"
+                      },
+                      "authentication": "@parameters('$authentication')"
+                    },
+                    "runAfter": {}
+                  }
+                },
+                "runAfter": {
+                  "Neu_Anhaenge": [
+                    "Succeeded"
+                  ]
+                }
+              },
+              "Eingangsbestaetigung": {
+                "type": "OpenApiConnection",
+                "inputs": {
+                  "host": {
+                    "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                    "connectionName": "shared_office365",
+                    "operationId": "ReplyToV3"
+                  },
+                  "parameters": {
+                    "messageId": "@triggerOutputs()?['body/id']",
+                    "replyParameters/Subject": "[#@{outputs('Nummer')}] Eingangsbestätigung: @{outputs('Betreff')}",
+                    "replyParameters/Body": "<p>Liebe Kollegin, lieber Kollege,</p><p>Ihre Anfrage ist als Ticket <b>@{outputs('Nummer')}</b> bei der IT eingegangen und wird schnellstmöglich bearbeitet.</p><p><a href=\"https://dfedorov12.github.io/tickets/#/t/@{outputs('Nummer')}\">Ticket ansehen</a> – dort finden Sie jederzeit den aktuellen Stand unter „Meine Anfragen\".</p><p>Möchten Sie etwas ergänzen? Antworten Sie einfach auf diese Mail; die Nummer im Betreff ordnet Ihre Antwort dem Ticket zu.</p><p>Vielen Dank!<br>Ihr IT-Team</p>",
+                    "replyParameters/ReplyAll": true,
+                    "replyParameters/Importance": "Normal"
+                  },
+                  "authentication": "@parameters('$authentication')"
+                },
+                "runAfter": {
+                  "Neu_Anhaenge_speichern": [
+                    "Succeeded",
+                    "Failed",
+                    "Skipped",
+                    "TimedOut"
+                  ]
+                }
+              },
+              "Zustaendige_informieren": {
+                "type": "If",
+                "expression": {
+                  "and": [
+                    {
+                      "equals": [
+                        "@outputs('Ziel')?['Benachrichtigen']",
+                        true
+                      ]
+                    },
+                    {
+                      "not": {
+                        "equals": [
+                          "@coalesce(outputs('Ziel')?['Bearbeiter'], '')",
+                          ""
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "actions": {
+                  "Info_neues_Ticket": {
+                    "type": "OpenApiConnection",
+                    "inputs": {
+                      "host": {
+                        "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                        "connectionName": "shared_office365",
+                        "operationId": "SendEmailV2"
+                      },
+                      "parameters": {
+                        "emailMessage/To": "@outputs('Ziel')?['Bearbeiter']",
+                        "emailMessage/Subject": "Neues Ticket @{outputs('Nummer')}: @{outputs('Betreff')}",
+                        "emailMessage/Body": "<p>Neues Ticket in der Queue <b>@{outputs('Ziel')?['Title']}</b> von @{outputs('Absender')}:</p><p><b>@{outputs('Betreff')}</b></p><p>@{triggerOutputs()?['body/bodyPreview']}</p><p><a href=\"https://dfedorov12.github.io/tickets/#/t/@{outputs('Nummer')}\">Ticket öffnen</a></p>",
+                        "emailMessage/Importance": "@{if(equals(triggerOutputs()?['body/importance'], 'high'), 'High', 'Normal')}"
+                      },
+                      "authentication": "@parameters('$authentication')"
+                    },
+                    "runAfter": {}
+                  }
+                },
+                "else": {
+                  "actions": {}
+                },
+                "runAfter": {
+                  "Eingangsbestaetigung": [
+                    "Succeeded",
+                    "Failed",
+                    "Skipped",
+                    "TimedOut"
+                  ]
+                }
+              }
+            }
+          },
+          "runAfter": {
+            "Antwort_pruefen": [
+              "Succeeded",
+              "Failed"
+            ]
+          }
+        }
+      }
+    },
+    "connectionReferences": {
+      "shared_office365": {
+        "connectionName": "shared-office365-51276fb3-f156-458e-8e20-6e10c333af31",
+        "source": "Embedded",
+        "id": "/providers/Microsoft.PowerApps/apis/shared_office365",
+        "tier": "NotSpecified",
+        "apiName": "office365"
+      },
+      "shared_sharepointonline": {
+        "connectionName": "shared-sharepointonl-d01ec634-24e0-4793-b043-00a25695b7e6",
+        "source": "Embedded",
+        "id": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+        "tier": "NotSpecified",
+        "apiName": "sharepointonline"
+      },
+      "shared_conversionservice": {
+        "connectionName": "shared-conversionser-2b7c9e41-5a3d-4f6b-8c1e-0d9a7b6c5e4f",
+        "source": "Embedded",
+        "id": "/providers/Microsoft.PowerApps/apis/shared_conversionservice",
+        "tier": "NotSpecified",
+        "apiName": "conversionservice"
+      }
+    },
+    "flowFailureAlertSubscribed": false,
+    "isManaged": false
+  }
+}

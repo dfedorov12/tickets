@@ -406,7 +406,7 @@ function zeigeEingang(ziel) {
       <li>Ticket anlegen, „Erstellt von" = Melder, Zuständige zuweisen, Anhänge + Original-Mail (.eml) anhängen, Eingangsbestätigung mit <code>[#Nummer]</code> senden.</li>
     </ol>
     <p><a class="knopf primaer" href="flow/Helpdesk-v2.zip" download>Flow-Paket herunterladen (Helpdesk-v2.zip)</a> <a class="knopf" href="https://github.com/dfedorov12/tickets/blob/main/docs/EINRICHTUNG.md" target="_blank" rel="noopener">Anleitung</a></p>
-    <p class="leise klein">Import: make.powerautomate.com → Meine Flows → Importieren → Paket (Legacy) → Verbindungen ${esc(KONFIG.ticketPostfach)} (Outlook + SharePoint) und ${esc(KONFIG.adminPostfach)} (Outlook) wählen. Danach den alten Flow „Helpdesk" ausschalten.</p>
+    <p class="leise klein">Import: make.powerautomate.com → Meine Flows → Importieren → Paket (Legacy) → Verbindungen für ${esc(KONFIG.ticketPostfach)} (Office 365 Outlook + SharePoint) wählen, „Content Conversion" neu anlegen (ohne Anmeldung). Fehler meldet der Flow an ${esc(KONFIG.adminPostfach)}. Danach den alten Flow „Helpdesk" ausschalten – nie beide gleichzeitig.</p>
   </div>
   <div class="karte"><h2>Aktuelles Routing</h2>
     <div class="tabelle-rahmen"><table class="daten"><thead><tr><th>Domain</th><th>Queue</th><th>Ergebnis</th><th>Zuständig</th></tr></thead><tbody>

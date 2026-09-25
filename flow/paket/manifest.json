@@ -1,0 +1,106 @@
+{
+  "schema": "1.0",
+  "details": {
+    "displayName": "Helpdesk v2",
+    "description": "Ticketsystem: Mail-Eingang ticket@dihag.com – konfigurationsgetrieben (Liste TicketQueues)",
+    "createdTime": "2026-09-25T00:00:00Z",
+    "packageTelemetryId": "b2f0c4de-7d1a-4f3b-8e61-1c9a0d5e7f42",
+    "creator": "n/v",
+    "sourceEnvironment": ""
+  },
+  "resources": {
+    "b2f0c4de-7d1a-4f3b-8e61-1c9a0d5e7f42": {
+      "type": "Microsoft.Flow/flows",
+      "suggestedCreationType": "New",
+      "creationType": "Existing, New, Update",
+      "details": {
+        "displayName": "Helpdesk v2"
+      },
+      "configurableBy": "User",
+      "hierarchy": "Root",
+      "dependsOn": [
+        "ac553e49-a869-41ab-979f-587fbd6fb09c",
+        "9e513651-01ba-4ccd-bccf-4ccf07fc9881",
+        "3c0c12f4-fe78-4424-9fe4-8354beb9bcfe",
+        "22d13a71-79e5-404c-b2d1-070a447a78da",
+        "6f7e2a10-3b5c-4d8e-a1f2-9c0b7d6e5a43",
+        "8a4d3c2b-1e0f-4a9b-b7c6-5d4e3f2a1b09"
+      ]
+    },
+    "ac553e49-a869-41ab-979f-587fbd6fb09c": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_office365",
+      "name": "shared_office365",
+      "type": "Microsoft.PowerApps/apis",
+      "suggestedCreationType": "Existing",
+      "details": {
+        "displayName": "Office 365 Outlook"
+      },
+      "configurableBy": "System",
+      "hierarchy": "Child",
+      "dependsOn": []
+    },
+    "9e513651-01ba-4ccd-bccf-4ccf07fc9881": {
+      "type": "Microsoft.PowerApps/apis/connections",
+      "suggestedCreationType": "Existing",
+      "creationType": "Existing",
+      "details": {
+        "displayName": "ticket@dihag.com"
+      },
+      "configurableBy": "User",
+      "hierarchy": "Child",
+      "dependsOn": [
+        "ac553e49-a869-41ab-979f-587fbd6fb09c"
+      ]
+    },
+    "3c0c12f4-fe78-4424-9fe4-8354beb9bcfe": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+      "name": "shared_sharepointonline",
+      "type": "Microsoft.PowerApps/apis",
+      "suggestedCreationType": "Existing",
+      "details": {
+        "displayName": "SharePoint"
+      },
+      "configurableBy": "System",
+      "hierarchy": "Child",
+      "dependsOn": []
+    },
+    "22d13a71-79e5-404c-b2d1-070a447a78da": {
+      "type": "Microsoft.PowerApps/apis/connections",
+      "suggestedCreationType": "Existing",
+      "creationType": "Existing",
+      "details": {
+        "displayName": "ticket@dihag.com"
+      },
+      "configurableBy": "User",
+      "hierarchy": "Child",
+      "dependsOn": [
+        "3c0c12f4-fe78-4424-9fe4-8354beb9bcfe"
+      ]
+    },
+    "6f7e2a10-3b5c-4d8e-a1f2-9c0b7d6e5a43": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_conversionservice",
+      "name": "shared_conversionservice",
+      "type": "Microsoft.PowerApps/apis",
+      "suggestedCreationType": "Existing",
+      "details": {
+        "displayName": "Content Conversion"
+      },
+      "configurableBy": "System",
+      "hierarchy": "Child",
+      "dependsOn": []
+    },
+    "8a4d3c2b-1e0f-4a9b-b7c6-5d4e3f2a1b09": {
+      "type": "Microsoft.PowerApps/apis/connections",
+      "suggestedCreationType": "Existing",
+      "creationType": "Existing",
+      "details": {
+        "displayName": "Content Conversion"
+      },
+      "configurableBy": "User",
+      "hierarchy": "Child",
+      "dependsOn": [
+        "6f7e2a10-3b5c-4d8e-a1f2-9c0b7d6e5a43"
+      ]
+    }
+  }
+}
