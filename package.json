@@ -1,0 +1,12 @@
+{
+  "name": "dihag-tickets",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DIHAG Ticketsystem (statische SPA auf GitHub Pages, Daten in SharePoint). package.json nur für Tests und Werkzeuge – GitHub Pages ignoriert es.",
+  "scripts": {
+    "test": "node scripts/test.mjs",
+    "flow": "node scripts/flow-paket.mjs",
+    "nachtlauf": "node scripts/nachtlauf.mjs"
+  }
+}

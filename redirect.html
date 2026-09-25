@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <!-- Rückkehrseite der Anmeldung (MSAL 5 „Redirect-Bridge"). Microsoft leitet nach der
+       Anmeldung hierher; die Seite reicht die Antwort an die App weiter. Bewusst leer und
+       ohne Einbett-Sperre: MSAL lädt sie auch im unsichtbaren iframe. Fester Titel, damit
+       der Anmeldecode nicht im Tab/Verlauf steht.
+       In Entra als SPA-Redirect-URI eintragen: https://dfedorov12.github.io/tickets/redirect.html -->
+  <title>Anmeldung – DIHAG Tickets</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Cache-Control" content="no-store">
+  <meta name="referrer" content="no-referrer">
+</head>
+<body>
+  <p>Anmeldung wird abgeschlossen …</p>
+  <script src="vendor/msal-browser/5.23.0/msal-redirect-bridge.min.js"></script>
+  <script src="js/redirect.js"></script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+# Screenshots des Browser-Rundgangs (lokal erzeugt)
+e2e/bilder/
+node_modules/
+.DS_Store
