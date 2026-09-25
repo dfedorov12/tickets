@@ -106,6 +106,9 @@ const ab = M.rechteAbgleich(sollSch, ist);
 gleich(ab.ok.map(s => s.wert), ['Ticket – Besitzer', 'Tickets SCH – Bearbeiter'], 'Abgleich: vorhandene Soll-Rechte (Name ohne Groß/klein)');
 gleich(ab.fehlt.map(s => s.wert), ['i:0#.f|membership|ticket@dihag.com', KONFIG.melderClaim], 'Abgleich: fehlende Rechte');
 gleich(ab.zuviel.map(z => `${z.titel}/${z.rolle.name}`), ['Tickets SCH – Bearbeiter/Mitwirken', 'Ticket – Mitglieder/Bearbeiten'], 'Abgleich: zu viel (beschränkter Zugriff zählt nicht)');
+const konfSoll = M.sollKonfigRechte(ctx);
+gleich(konfSoll.map(s => `${s.anzeige}=${s.rolle.anzeige}`), ['Ticket – Besitzer=Vollzugriff', 'ticket@dihag.com=Lesen', 'Jeder=Lesen'], 'Konfigurationsliste: alle lesen, nur Admins ändern');
+ok(!konfSoll.some(s => s.rolle.typ === 5 && s.art === 'login'), 'Konfigurationsliste: niemand außer Admins mit Vollzugriff');
 gleich(M.einstellungsAbgleich({ ReadSecurity: 1, NoCrawl: true }, { ReadSecurity: 2, NoCrawl: true }), [{ feld: 'ReadSecurity', ist: 1, soll: 2 }], 'Einstellungs-Abgleich');
 
 // ── Tickets ──

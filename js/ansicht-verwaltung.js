@@ -11,6 +11,7 @@ import {
 import {
   konfigListeAnlegen, queueSpeichern, queueLoeschen, stufePruefen, stufeSicherstellen, queuePruefen, queueEinrichten,
   gruppeLesen, gruppeSicherstellen, mitgliedHinzufuegen, mitgliedEntfernen, auswahlAngleichen, sollKontext,
+  konfigPruefen, konfigAbgleichen,
 } from './einrichtung.js';
 import { kopiereTicket, inPapierkorb } from './kopie.js';
 import { esc } from './text.js';
@@ -216,8 +217,32 @@ async function zeigeRechte(ziel, aktuell) {
       <p class="leise klein">Ticketlisten: eigene Berechtigungen (keine Vererbung), „nur selbst erstellte Elemente lesen/bearbeiten", nicht in der SharePoint-Suche, Versionierung an. Bearbeiter sehen dank ihrer Stufe alle Tickets ihrer Queue, Melder nur die eigenen – durchgesetzt von SharePoint, nicht über Ansichten.</p>
       <div class="knopfzeile"><button class="knopf" data-aktion="v-alle-pruefen">Alle prüfen</button></div>
     </div>
+    <div class="karte" id="v-konfig">${konfigKarte(_konfigPruefung)}</div>
     ${qs.length ? qs.map(q => `<div class="karte queue-pruefung" id="v-q-${esc(q.kennung)}">${queueKarte(q, _pruefungen.get(q.kennung))}</div>`).join('') : leer('Noch keine Queues mit Liste.')}`;
 }
+
+let _konfigPruefung;
+
+function konfigKarte(p) {
+  const kopf = `<div class="karte-kopfzeile"><h2>Konfigurationsliste ${esc(KONFIG.konfigListe)}</h2>
+    <div class="knopfzeile"><button class="knopf klein" data-aktion="v-konfig-pruefen">Prüfen</button><button class="knopf primaer klein" data-aktion="v-konfig-abgleichen">Abgleichen</button></div></div>
+    <p class="leise klein">Soll: alle lesen (die App findet darüber die Listen), ändern dürfen nur Admins – niemand sonst kann das Routing verändern.</p>`;
+  if (p === undefined) return kopf;
+  if (p === null) return kopf + haken(false, 'Liste fehlt');
+  return kopf + `<dl class="pruefliste"><dt>Vererbung</dt><dd>${haken(p.eindeutig, p.eindeutig ? 'eigene Berechtigungen' : 'erbt von der Site')}</dd><dt>Rechte</dt><dd>${rechteText(p.rechte)}</dd></dl><pre class="protokoll" hidden></pre>`;
+}
+
+aktion('v-konfig-pruefen', el => beschaeftigt(el, 'Prüfe …', async () => { _konfigPruefung = await konfigPruefen(); $('#v-konfig').innerHTML = konfigKarte(_konfigPruefung); }));
+aktion('v-konfig-abgleichen', async el => {
+  if (!await bestaetigen('Konfigurationsliste abgleichen?', `Eigene Berechtigungen: ${zustand.site.ownerGruppe} Vollzugriff, ${KONFIG.ticketPostfach} und ${KONFIG.melderAnzeige} Lesen. Alle anderen Rechte auf der Liste werden entfernt.`, { ja: 'Abgleichen' })) return;
+  const log = [];
+  await beschaeftigt(el, '…', () => konfigAbgleichen(t => log.push(t)));
+  _konfigPruefung = await konfigPruefen();
+  $('#v-konfig').innerHTML = konfigKarte(_konfigPruefung);
+  const pre = $('#v-konfig .protokoll');
+  if (pre && log.length) { pre.hidden = false; pre.textContent = log.join('\n'); }
+  meldung('Konfigurationsliste abgeglichen', 'erfolg');
+});
 
 const haken = (ok, text) => `<span class="${ok ? 'gruen' : 'rot'}">${ok ? '✓' : '✗'}</span> ${text}`;
 
@@ -262,6 +287,8 @@ async function pruefeUndZeige(kennung) {
 
 aktion('v-pruefen', el => beschaeftigt(el, 'Prüfe …', () => pruefeUndZeige(el.dataset.kennung)));
 aktion('v-alle-pruefen', el => beschaeftigt(el, 'Prüfe …', async () => {
+  _konfigPruefung = await konfigPruefen();
+  $('#v-konfig').innerHTML = konfigKarte(_konfigPruefung);
   for (const q of zustand.queues.filter(x => x.modus !== 'Hinweis')) await pruefeUndZeige(q.kennung);
 }));
 aktion('v-stufe', el => beschaeftigt(el, '…', async () => { await stufeSicherstellen(); meldung('Berechtigungsstufe angelegt', 'erfolg'); neuZeigen(); }));

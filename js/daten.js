@@ -43,6 +43,7 @@ export async function ladeQueues() {
     zeilen = await spAlle(`_api/web/lists/getbytitle(${lit(KONFIG.konfigListe)})/items?$top=500`);
   } catch (e) {
     if (e instanceof ApiFehler && (e.status === 404 || /does not exist|existiert nicht/i.test(e.message))) zustand.konfigFehlt = true;
+    else if (e instanceof ApiFehler && (e.status === 403 || e.status === 401)) throw new Error('Keine Leseberechtigung auf die Ticket-Konfiguration. Bitte die IT informieren (Verwaltung → Rechte → Konfigurationsliste abgleichen).');
     else throw e;
   }
   zustand.queues = zeilen.map(queueAusFeldern).sort((a, b) => a.reihenfolge - b.reihenfolge || a.name.localeCompare(b.name));

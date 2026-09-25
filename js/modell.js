@@ -281,6 +281,20 @@ export function sollRechte(q, ctx, art = 'tickets') {
   return soll;
 }
 
+/**
+ * Soll-Berechtigungen der Konfigurationsliste „TicketQueues": alle lesen (die App braucht
+ * die Queues, um die Listen zu finden – vertraulich ist darin nichts), ändern nur Admins.
+ * So kann niemand außer den Websitebesitzern das Routing verbiegen.
+ */
+export function sollKonfigRechte(ctx) {
+  const soll = [
+    { art: 'gruppe', wert: ctx.ownerGruppe, anzeige: ctx.ownerGruppe, rolle: ROLLE.voll, grund: 'Websitebesitzer = Admins' },
+    { art: 'login', wert: claimFuerMail(ctx.dienstkonto), anzeige: ctx.dienstkonto, rolle: ROLLE.lesen, grund: 'Flow liest die Queues' },
+    { art: 'login', wert: ctx.melderClaim, anzeige: ctx.melderAnzeige || ctx.melderClaim, rolle: ROLLE.lesen, grund: 'App findet damit die Listen' },
+  ].filter(s => s.wert && s.wert !== claimFuerMail(''));
+  return soll.map(s => ({ ...s, schluessel: `${s.art}:${String(s.wert).toLowerCase()}|${s.rolle.typ}` }));
+}
+
 const _lc = s => String(s ?? '').toLowerCase();
 
 /** Rolle aus SharePoint, die für den Abgleich zählt (nicht „Beschränkter Zugriff"/versteckt). */

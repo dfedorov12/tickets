@@ -11,6 +11,11 @@ import { KONFIG, siteUrl } from './config.js';
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const warte = ms => new Promise(r => setTimeout(r, ms));
 
+// Woher die Zugriffstoken kommen: im Browser MSAL (angemeldete Person), im Nachtlauf
+// ein App-Token per Zertifikat. So nutzen beide dieselben Prüf- und Einrichtungsfunktionen.
+let _token = token;
+export function tokenQuelle(fn) { _token = fn; }
+
 export class ApiFehler extends Error {
   constructor(text, status, quelle) { super(text); this.status = status; this.quelle = quelle; }
 }
@@ -39,7 +44,7 @@ async function _abruf(url, init, quelle) {
 // ── Graph ────────────────────────────────────────────────────────────────
 
 export async function graph(pfad, { method = 'GET', body, headers = {} } = {}) {
-  const tok = await token(KONFIG.graphScopes);
+  const tok = await _token(KONFIG.graphScopes);
   const url = pfad.startsWith('https://') ? pfad : GRAPH + pfad;
   const init = { method, headers: { Authorization: 'Bearer ' + tok, ...headers } };
   if (body !== undefined) { init.body = JSON.stringify(body); init.headers['Content-Type'] = 'application/json'; }
@@ -94,7 +99,7 @@ export function guid(id) {
  * roh: Response zurückgeben (Downloads).
  */
 export async function sp(pfad, { method = 'GET', body, headers = {}, verbose = false, roh = false } = {}) {
-  const tok = await token(spScopes());
+  const tok = await _token(spScopes());
   const url = pfad.startsWith('https://') ? pfad : `${siteUrl()}/${pfad.replace(/^\//, '')}`;
   const art = verbose ? 'application/json;odata=verbose' : 'application/json;odata=nometadata';
   const init = { method: method === 'MERGE' || method === 'DELETE' ? 'POST' : method, headers: { Authorization: 'Bearer ' + tok, Accept: art, ...headers } };

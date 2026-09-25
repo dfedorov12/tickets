@@ -1,0 +1,22 @@
+# Tests: Modell, statische Modulprüfung, Flow-Paket (Struktur + Ausdrücke), Nachtlauf-Probelauf.
+# Ohne Abhängigkeiten, ohne Tenant. Der Browser-Rundgang (e2e/rundgang.mjs) läuft lokal.
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0 – auf den Commit festgelegt
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020   # v4.4.0
+        with:
+          node-version: 22
+      - name: Testsuiten
+        run: node scripts/test.mjs

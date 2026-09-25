@@ -1,0 +1,50 @@
+# Nachtlauf des Ticketsystems: Rechte aller Ticketlisten gegen das Soll prüfen (optional
+# beheben) und werktags eine Tagesübersicht je Queue an die Bearbeiter schicken.
+# Einrichtung (App-Registrierung mit Zertifikat, Secrets): docs/EINRICHTUNG.md, Teil D.
+# Achtung: Das Repo ist öffentlich, die Logs auch – das Skript loggt nur Zähler und Listennamen.
+name: Nachtlauf Tickets
+
+on:
+  schedule:
+    - cron: '17 4 * * *'     # täglich ~06:17 MESZ / 05:17 MEZ (UTC); Übersicht nur Mo–Fr
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Probelauf (nichts senden, nichts ändern)'
+        type: boolean
+        default: true
+      reparieren:
+        description: 'Rechte-Abweichungen beheben'
+        type: boolean
+        default: false
+      aufgaben:
+        description: 'Aufgaben (rechte,uebersicht)'
+        type: string
+        default: 'rechte,uebersicht'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nachtlauf
+  cancel-in-progress: false
+
+jobs:
+  nachtlauf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020   # v4.4.0
+        with:
+          node-version: 22
+      - name: Nachtlauf
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_ZERTIFIKAT: ${{ secrets.AZURE_ZERTIFIKAT }}
+          MAIL_SENDER: ${{ secrets.MAIL_SENDER }}
+          # Zeitplan: echter Lauf; Reparatur nur, wenn die Repo-Variable RECHTE_AUTO_REPARATUR=true gesetzt ist.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+          REPARIEREN: ${{ github.event_name == 'workflow_dispatch' && inputs.reparieren || vars.RECHTE_AUTO_REPARATUR || 'false' }}
+          AUFGABEN: ${{ github.event_name == 'workflow_dispatch' && inputs.aufgaben || '' }}
+        run: node scripts/nachtlauf.mjs

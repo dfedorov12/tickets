@@ -16,7 +16,7 @@
 import { KONFIG, KONFIG_SPALTEN, SOLL_LISTENEINSTELLUNGEN, SOLL_NOTIZEINSTELLUNGEN, NOTIZ_ENDUNG, STATUS, PRIORITAETEN, FELDER } from './config.js';
 import { sp, spAlle, graph, guid, lit } from './api.js';
 import {
-  sollRechte, rechteAbgleich, einstellungsAbgleich, istAusRollenzuweisungen, bearbeitungsMaske,
+  sollRechte, sollKonfigRechte, rechteAbgleich, einstellungsAbgleich, istAusRollenzuweisungen, bearbeitungsMaske,
   queueZuFeldern, claimFuerMail, mailAusLogin, normPrio,
 } from './modell.js';
 import { zustand } from './daten.js';
@@ -43,6 +43,21 @@ export async function konfigListeAnlegen() {
     method: 'POST',
     body: { displayName: KONFIG.konfigListe, description: 'Queues des Ticketsystems (gepflegt in der Tickets-App, gelesen vom Flow)', list: { template: 'genericList' }, columns: KONFIG_SPALTEN },
   });
+  await konfigAbgleichen();
+}
+
+/** Rechte der Konfigurationsliste gegen das Soll (alle lesen, nur Admins ändern). */
+export async function konfigPruefen() {
+  const l = await listeLesen(KONFIG.konfigListe);
+  if (!l) return null;
+  return { liste: l, eindeutig: l.HasUniqueRoleAssignments, rechte: rechteAbgleich(sollKonfigRechte(sollKontext()), await rechteLesen(l.Id)) };
+}
+
+export async function konfigAbgleichen(protokoll = () => {}) {
+  const l = await listeLesen(KONFIG.konfigListe);
+  if (!l) throw new Error('Konfigurationsliste fehlt');
+  await einstellungenAnwenden(l.Id, { NoCrawl: true, EnableVersioning: true });
+  await rechteAnwenden(l.Id, sollKonfigRechte(sollKontext()), protokoll);
 }
 
 async function konfigListeId() {
@@ -169,7 +184,10 @@ export async function ticketListeAnlegen(q, protokoll = () => {}) {
   // Spalten angleichen
   const basis = await spAlle(`_api/web/lists/getbytitle(${lit(KONFIG.basisListe)})/fields?$filter=Hidden eq false and ReadOnlyField eq false&$select=InternalName,Title,SchemaXml,TypeAsString,FromBaseType`);
   const ziel = new Set((await spAlle(`_api/web/lists(${guid(id)})/fields?$select=InternalName`)).map(f => f.InternalName));
-  const eigene = basis.filter(f => !f.FromBaseType && !ziel.has(f.InternalName));
+  // Alles, was die neue (leere) Liste noch nicht hat – nicht nur eigene Spalten: Stammt die
+  // Basisliste aus einer Vorlage, gelten deren Spalten als „Basistyp" und fehlten sonst.
+  const NIE = new Set(['ContentType', 'Attachments', 'Title', '_ColorTag', 'ComplianceAssetId']);
+  const eigene = basis.filter(f => !ziel.has(f.InternalName) && !NIE.has(f.InternalName));
   const reihenfolge = [...eigene.filter(f => f.TypeAsString !== 'Calculated'), ...eigene.filter(f => f.TypeAsString === 'Calculated')];
   const fehler = [];
   for (const f of reihenfolge) {
@@ -227,7 +245,7 @@ async function prinzipalId(s) {
  * Rechte einer Liste auf das Soll bringen. Reihenfolge: Vererbung aufheben (Kopie
  * der bisherigen Rechte), fehlende vergeben, erst dann Überzähliges entziehen.
  */
-export async function rechteAnwenden(listId, soll, protokoll = () => {}) {
+export async function rechteAnwenden(listId, soll, protokoll = () => {}, { ichMail = meineMail() } = {}) {
   const info = await sp(`_api/web/lists(${guid(listId)})?$select=HasUniqueRoleAssignments`);
   if (!info.HasUniqueRoleAssignments) {
     await sp(`_api/web/lists(${guid(listId)})/breakroleinheritance(copyRoleAssignments=true,clearSubscopes=true)`, { method: 'POST' });
@@ -242,10 +260,10 @@ export async function rechteAnwenden(listId, soll, protokoll = () => {}) {
   }
   abgleich = rechteAbgleich(soll, await rechteLesen(listId));
   if (abgleich.fehlt.length) throw new Error('Soll-Rechte ließen sich nicht vollständig vergeben – es wird nichts entzogen.');
-  const ich = claimFuerMail(meineMail());
+  const ich = ichMail ? claimFuerMail(ichMail) : '';
   for (const z of abgleich.zuviel) {
     // Den eigenen direkten Zugang nie entziehen – sonst wäre die Liste für diesen Admin zu.
-    if (String(z.login).toLowerCase() === ich) { protokoll(`• eigener Zugang (${z.rolle.name}) bleibt – bitte ggf. von Hand entfernen`); continue; }
+    if (ich && String(z.login).toLowerCase() === ich) { protokoll(`• eigener Zugang (${z.rolle.name}) bleibt – bitte ggf. von Hand entfernen`); continue; }
     await sp(`_api/web/lists(${guid(listId)})/roleassignments/removeroleassignment(principalid=${Number(z.principalId)},roledefid=${Number(z.rolle.id)})`, { method: 'POST' });
     protokoll(`− ${z.titel || z.login}: ${z.rolle.name}`);
   }
